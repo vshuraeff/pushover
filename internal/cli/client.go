@@ -134,6 +134,9 @@ func runClientFetch(ctx context.Context, cmd *cobra.Command, jsonOutput bool) er
 func writeFetchedMessages(cmd *cobra.Command, messages []openclient.Message, jsonOutput bool) error {
 	output := cmd.OutOrStdout()
 	if jsonOutput {
+		if messages == nil {
+			messages = []openclient.Message{}
+		}
 		encoded, err := json.Marshal(messages)
 		if err != nil {
 			return fmt.Errorf("encode messages: %w", err)
