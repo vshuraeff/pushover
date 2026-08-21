@@ -11,16 +11,19 @@ import (
 	"testing"
 )
 
+type commandInvocation struct {
+	name string
+	args []string
+}
+
 func TestInstallSignsStagedBundleWithoutEntitlements(t *testing.T) {
 	source := testBundle(t, "source")
 	dest := filepath.Join(t.TempDir(), "Povr.app")
 
 	originalExecCommand := execCommand
-	var commandName string
-	var commandArgs []string
+	var commands []commandInvocation
 	execCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
-		commandName = name
-		commandArgs = append([]string(nil), args...)
+		commands = append(commands, commandInvocation{name: name, args: append([]string(nil), args...)})
 		return nil, nil
 	}
 	t.Cleanup(func() {
@@ -30,20 +33,58 @@ func TestInstallSignsStagedBundleWithoutEntitlements(t *testing.T) {
 	if err := Install(InstallOptions{Source: source, Dest: dest}); err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
-	if commandName != "codesign" {
-		t.Errorf("codesign command = %q, want codesign", commandName)
+	var signed bool
+	for _, command := range commands {
+		if command.name != "codesign" {
+			continue
+		}
+		signed = true
+		if !containsArgs(command.args, "--force") {
+			t.Errorf("codesign args = %q, want --force", command.args)
+		}
+		if !containsArgPair(command.args, "--sign", "-") {
+			t.Errorf("codesign args = %q, want --sign -", command.args)
+		}
+		if containsArgs(command.args, "--entitlements") {
+			t.Errorf("codesign args = %q, must not include --entitlements", command.args)
+		}
 	}
-	if !containsArgs(commandArgs, "--force") {
-		t.Errorf("codesign args = %q, want --force", commandArgs)
+	if !signed {
+		t.Error("codesign command was not invoked")
 	}
-	if !containsArgPair(commandArgs, "--sign", "-") {
-		t.Errorf("codesign args = %q, want --sign -", commandArgs)
-	}
-	if containsArgs(commandArgs, "--entitlements") {
-		t.Errorf("codesign args = %q, must not include --entitlements", commandArgs)
+	if !containsCommand(commands, lsregisterPath, "-f", dest) {
+		t.Errorf("lsregister invocation not found in %q", commands)
 	}
 	if _, err := os.Stat(filepath.Join(dest, "Contents", "MacOS", "povr-helper")); err != nil {
 		t.Errorf("installed helper file: %v", err)
+	}
+}
+
+func TestInstallIgnoresLaunchServicesRegistrationFailure(t *testing.T) {
+	source := testBundle(t, "source")
+	dest := filepath.Join(t.TempDir(), "Povr.app")
+
+	originalExecCommand := execCommand
+	var commands []commandInvocation
+	execCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		commands = append(commands, commandInvocation{name: name, args: append([]string(nil), args...)})
+		if name == lsregisterPath {
+			return nil, errors.New("forced lsregister failure")
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() {
+		execCommand = originalExecCommand
+	})
+
+	if err := Install(InstallOptions{Source: source, Dest: dest}); err != nil {
+		t.Fatalf("Install() error = %v, want nil when lsregister fails", err)
+	}
+	if !containsCommand(commands, "codesign") {
+		t.Error("codesign command was not invoked")
+	}
+	if !containsCommand(commands, lsregisterPath, "-f", dest) {
+		t.Errorf("lsregister invocation not found in %q", commands)
 	}
 }
 
@@ -185,6 +226,29 @@ func containsArgPair(args []string, first, second string) bool {
 	for index := 0; index+1 < len(args); index++ {
 		if args[index] == first && args[index+1] == second {
 			return true
+		}
+	}
+	return false
+}
+
+func containsCommand(commands []commandInvocation, wantName string, wantArgs ...string) bool {
+	for _, command := range commands {
+		if command.name != wantName {
+			continue
+		}
+		if len(wantArgs) == 0 {
+			return true
+		}
+		if len(command.args) != len(wantArgs) {
+			continue
+		}
+		for index, wantArg := range wantArgs {
+			if command.args[index] != wantArg {
+				break
+			}
+			if index == len(wantArgs)-1 {
+				return true
+			}
 		}
 	}
 	return false

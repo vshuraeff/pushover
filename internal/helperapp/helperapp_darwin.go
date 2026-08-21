@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +23,8 @@ var execCommand execRunner = func(ctx context.Context, name string, args ...stri
 }
 
 var renamePath = os.Rename
+
+const lsregisterPath = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 // install copies and ad-hoc signs a helper bundle before atomically installing it.
 func Install(opts InstallOptions) (err error) {
@@ -97,6 +100,10 @@ func Install(opts InstallOptions) (err error) {
 		if err := os.RemoveAll(backupPath); err != nil {
 			return fmt.Errorf("helperapp: remove previous bundle backup %q: %w", backupPath, err)
 		}
+	}
+	// refresh launchservices registration so notification center picks up the current icon; best effort, never fails install.
+	if _, err := execCommand(context.Background(), lsregisterPath, "-f", dest); err != nil {
+		slog.Default().Warn("helperapp: refresh LaunchServices registration failed", "error", err, "bundle", dest)
 	}
 	return nil
 }

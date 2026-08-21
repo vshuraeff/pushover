@@ -70,3 +70,6 @@ else
 fi
 
 echo "installed Povr.app at $install_path"
+if ! /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$install_path"; then
+	echo "warning: lsregister refresh failed for $install_path" >&2
+fi
