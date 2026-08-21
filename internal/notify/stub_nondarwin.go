@@ -8,8 +8,8 @@ import "context"
 type StubNotifier struct{}
 
 // NewStubNotifier creates a notifier for unsupported platforms.
-func NewStubNotifier() *StubNotifier {
-	return &StubNotifier{}
+func NewStubNotifier() (*StubNotifier, error) {
+	return nil, ErrNotImplemented
 }
 
 // Notify reports that this platform has no notification backend.

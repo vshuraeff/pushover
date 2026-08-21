@@ -17,5 +17,5 @@ func selectPlatformOverride(_ context.Context, backend string) (Notifier, error)
 }
 
 func selectPlatformDefault(_ context.Context) (Notifier, error) {
-	return NewStubNotifier(), nil
+	return NewStubNotifier()
 }
