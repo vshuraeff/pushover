@@ -3,6 +3,7 @@ package mockpushover
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -176,15 +177,31 @@ func (s *Server) recordRequest(r *http.Request) {
 	for key, values := range r.Form {
 		fields[key] = append([]string(nil), values...)
 	}
+	attachments := make(map[string][]AttachmentDigest)
 	if r.MultipartForm != nil {
 		for key, files := range r.MultipartForm.File {
 			for _, file := range files {
 				fields[key] = append(fields[key], file.Filename)
+				opened, err := file.Open()
+				if err != nil {
+					continue
+				}
+				data, readErr := io.ReadAll(io.LimitReader(opened, maxAttachmentBytes+1))
+				closeErr := opened.Close()
+				if readErr != nil || closeErr != nil || len(data) > maxAttachmentBytes {
+					continue
+				}
+				digest := sha256.Sum256(data)
+				attachments[key] = append(attachments[key], AttachmentDigest{
+					Filename: file.Filename,
+					Size:     int64(len(data)),
+					SHA256:   hex.EncodeToString(digest[:]),
+				})
 			}
 		}
 	}
 	entry := JournaledRequest{
-		Method: r.Method, Path: r.URL.Path, Fields: fields,
+		Method: r.Method, Path: r.URL.Path, Fields: fields, Attachments: attachments,
 		Headers: r.Header.Clone(), Timestamp: time.Now().UTC(),
 	}
 	s.store.mu.Lock()

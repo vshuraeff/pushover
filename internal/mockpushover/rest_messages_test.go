@@ -2,9 +2,13 @@ package mockpushover
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
+	"image"
+	"image/color"
 	"image/png"
 	"io"
 	"net/http"
@@ -76,7 +80,15 @@ func TestMessagesAndOpenClient(t *testing.T) {
 
 	t.Run("multipart attachment is stored and journaled", func(t *testing.T) {
 		server := startTestServer(t)
-		attachment := []byte("fixture-attachment")
+		var attachmentBuffer bytes.Buffer
+		attachmentImage := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+		attachmentImage.SetNRGBA(0, 0, color.NRGBA{R: 0x12, G: 0x34, B: 0x56, A: 0xFF})
+		if err := png.Encode(&attachmentBuffer, attachmentImage); err != nil {
+			t.Fatalf("png.Encode() error = %v", err)
+		}
+		attachment := attachmentBuffer.Bytes()
+		expectedDigest := sha256.Sum256(attachment)
+		expectedSHA256 := hex.EncodeToString(expectedDigest[:])
 		response, body := doMultipart(t, server, "/1/messages.json", map[string]string{
 			"token": testToken, "user": testUser, "message": "with attachment",
 		}, "fixture.png", attachment)
@@ -93,6 +105,19 @@ func TestMessagesAndOpenClient(t *testing.T) {
 		}
 		if got := requests[0].Fields["attachment"]; len(got) != 1 || got[0] != "fixture.png" {
 			t.Fatalf("journal attachment field = %#v", got)
+		}
+		attachments := requests[0].Attachments["attachment"]
+		if len(attachments) != 1 {
+			t.Fatalf("journal attachments = %#v", attachments)
+		}
+		if got := attachments[0]; got.Filename != "fixture.png" || got.Size != int64(len(attachment)) || got.SHA256 != expectedSHA256 {
+			t.Fatalf("journal attachment digest = %#v", got)
+		}
+		corrupted := append([]byte(nil), attachment...)
+		corrupted[len(corrupted)-1] ^= 1
+		corruptedDigest := sha256.Sum256(corrupted)
+		if hex.EncodeToString(corruptedDigest[:]) == attachments[0].SHA256 {
+			t.Fatal("corrupted attachment hash matches journaled hash")
 		}
 	})
 

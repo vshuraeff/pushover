@@ -169,12 +169,19 @@ type FaultRule struct {
 	Times    int    `json:"times"`
 }
 
+type AttachmentDigest struct {
+	Filename string `json:"filename"`
+	Size     int64  `json:"size"`
+	SHA256   string `json:"sha256"`
+}
+
 type JournaledRequest struct {
-	Method    string              `json:"method"`
-	Path      string              `json:"path"`
-	Fields    map[string][]string `json:"fields"`
-	Headers   http.Header         `json:"headers"`
-	Timestamp time.Time           `json:"timestamp"`
+	Method      string                        `json:"method"`
+	Path        string                        `json:"path"`
+	Fields      map[string][]string           `json:"fields"`
+	Attachments map[string][]AttachmentDigest `json:"attachments,omitempty"`
+	Headers     http.Header                   `json:"headers"`
+	Timestamp   time.Time                     `json:"timestamp"`
 }
 
 type loginAccount struct {
