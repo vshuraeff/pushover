@@ -11,8 +11,6 @@ import (
 	"github.com/vshuraeff/pushover/internal/config"
 )
 
-const defaultGroupAPIBaseURL = "https://api.pushover.net/1"
-
 func init() {
 	register(func(root *cobra.Command) {
 		root.AddCommand(newGroupCommand())
@@ -24,7 +22,6 @@ func newGroupCommand() *cobra.Command {
 		Use:   "group",
 		Short: "Manage Pushover groups",
 	}
-	group.PersistentFlags().String("api-base-url", defaultGroupAPIBaseURL, "Pushover API base URL")
 	group.PersistentFlags().Bool("json", false, "print JSON output")
 	group.AddCommand(
 		newGroupCreateCommand(),
@@ -208,10 +205,7 @@ func groupClient(cmd *cobra.Command) (*api.Client, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	baseURL, err := groupStringFlag(cmd, "api-base-url")
-	if err != nil {
-		return nil, "", err
-	}
+	baseURL := strings.TrimRight(config.APIURL(), "/") + "/1"
 	return api.New(baseURL, Version), appToken, nil
 }
 

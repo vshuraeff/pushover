@@ -161,8 +161,8 @@ them.
 
 ### Groups
 
-`povr group` accepts `--api-base-url` (default `https://api.pushover.net/1`) and
-`--json` for all its subcommands.
+`povr group` accepts `--json` for all its subcommands and uses the standard
+endpoint configuration.
 
 ```sh
 povr group create oncall
@@ -303,8 +303,7 @@ export PUSHOVER_NOTIFY_BACKEND=file:/tmp/povr-notifications.jsonl
 ```
 
 The file backend appends one JSON record per notification, including the resolved
-level and whether sound was suppressed. `povr group` ignores `PUSHOVER_API_URL`; point
-it at the mock with `--api-base-url http://127.0.0.1:53412/1`.
+level and whether sound was suppressed.
 
 ### Tests
 
