@@ -61,9 +61,6 @@ func (c *Client) PollReceipt(ctx context.Context, token, receipt string, stop fu
 	if stop == nil {
 		return nil, fmt.Errorf("receipt polling stop function is required")
 	}
-	if sleep == nil {
-		sleep = time.Sleep
-	}
 	pollOptions := append([]RequestOption{NoRetry()}, options...)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -79,6 +76,24 @@ func (c *Client) PollReceipt(ctx context.Context, token, receipt string, stop fu
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		if sleep == nil {
+			timer := time.NewTimer(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
+			continue
+		}
 		sleep(5 * time.Second)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
 }

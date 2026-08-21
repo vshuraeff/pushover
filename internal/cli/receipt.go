@@ -64,7 +64,8 @@ func newReceiptStatusCommand() *cobra.Command {
 }
 
 func newReceiptCancelCommand() *cobra.Command {
-	return &cobra.Command{
+	var jsonOutput bool
+	cmd := &cobra.Command{
 		Use:   "cancel <receipt-id>",
 		Short: "Cancel an emergency message receipt",
 		Args:  cobra.ExactArgs(1),
@@ -76,14 +77,23 @@ func newReceiptCancelCommand() *cobra.Command {
 			if err := api.New(config.APIURL(), Version).CancelReceipt(cmd.Context(), token, args[0]); err != nil {
 				return err
 			}
+			if jsonOutput {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+					Receipt   string `json:"receipt"`
+					Cancelled bool   `json:"cancelled"`
+				}{Receipt: args[0], Cancelled: true})
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "receipt %s cancelled\n", args[0])
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "print JSON output")
+	return cmd
 }
 
 func newReceiptCancelByTagCommand() *cobra.Command {
-	return &cobra.Command{
+	var jsonOutput bool
+	cmd := &cobra.Command{
 		Use:   "cancel-by-tag <tag>",
 		Short: "Cancel emergency message receipts by tag",
 		Args:  cobra.ExactArgs(1),
@@ -96,10 +106,18 @@ func newReceiptCancelByTagCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if jsonOutput {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+					Tag       string `json:"tag"`
+					Cancelled bool   `json:"cancelled"`
+				}{Tag: args[0], Cancelled: true})
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "cancelled: %d\n", cancelled)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "print JSON output")
+	return cmd
 }
 
 func receiptToken(cmd *cobra.Command) (string, error) {

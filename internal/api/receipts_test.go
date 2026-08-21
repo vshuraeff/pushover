@@ -106,8 +106,39 @@ func TestPollReceiptUsesFiveSecondFloor(t *testing.T) {
 	}
 }
 
+func TestPollReceiptWaitRespectsContextCancellation(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"status":1,"acknowledged":0,"expired":0,"called_back":0,"cancelled":false}`))
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	result, err := New(server.URL, "test").PollReceipt(
+		ctx, "test-token", "receipt-id",
+		func(*Receipt) bool { return false }, nil,
+	)
+	if err != context.DeadlineExceeded {
+		t.Errorf("PollReceipt() error = %v, want deadline exceeded", err)
+	}
+	if result != nil {
+		t.Errorf("PollReceipt() result = %+v, want nil", result)
+	}
+	if requests != 1 {
+		t.Errorf("requests = %d, want 1", requests)
+	}
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Errorf("PollReceipt() waited %s, want prompt cancellation", elapsed)
+	}
+}
+
 func TestPollReceiptRejectsNilStop(t *testing.T) {
-	result, err := New("http://example.test", "test").PollReceipt(context.Background(), "test-token", "receipt-id", nil, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer server.Close()
+	result, err := New(server.URL, "test").PollReceipt(context.Background(), "test-token", "receipt-id", nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "stop") {
 		t.Errorf("PollReceipt() error = %v, want stop function error", err)
 	}

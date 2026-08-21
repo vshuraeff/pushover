@@ -79,6 +79,28 @@ func TestSendCommandReadsStdin(t *testing.T) {
 	}
 }
 
+func TestSendCommandMessageFlag(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm() error = %v", err)
+		}
+		if got := r.Form.Get("message"); got != "message from flag" {
+			t.Errorf("message = %q, want message from flag", got)
+		}
+		_, _ = w.Write([]byte(`{"status":1,"request":"request-id"}`))
+	}))
+	defer server.Close()
+	configureCLITestEnv(t, server.URL)
+
+	output, err := executeCLI(t, nil, "send", "--message", "message from flag")
+	if err != nil {
+		t.Fatalf("povr send error = %v", err)
+	}
+	if !strings.Contains(output, "request: request-id") {
+		t.Errorf("send output = %q", output)
+	}
+}
+
 func TestSendCommandSurfacesValidationError(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -70,6 +70,20 @@ func TestReceiptCommands(t *testing.T) {
 	if !strings.Contains(cancelOutput, "receipt receipt-id cancelled") {
 		t.Errorf("receipt cancel output = %q", cancelOutput)
 	}
+	cancelJSONOutput, err := executeCLI(t, nil, "receipt", "cancel", "--json", "receipt-id")
+	if err != nil {
+		t.Fatalf("povr receipt cancel --json error = %v", err)
+	}
+	var cancelJSON struct {
+		Receipt   string `json:"receipt"`
+		Cancelled bool   `json:"cancelled"`
+	}
+	if err := json.Unmarshal([]byte(cancelJSONOutput), &cancelJSON); err != nil {
+		t.Fatalf("receipt cancel JSON output is not JSON: %v", err)
+	}
+	if cancelJSON.Receipt != "receipt-id" || !cancelJSON.Cancelled {
+		t.Errorf("receipt cancel JSON = %+v", cancelJSON)
+	}
 
 	byTagOutput, err := executeCLI(t, nil, "receipt", "cancel-by-tag", "release")
 	if err != nil {
@@ -77,5 +91,19 @@ func TestReceiptCommands(t *testing.T) {
 	}
 	if !strings.Contains(byTagOutput, "cancelled: 2") {
 		t.Errorf("receipt cancel-by-tag output = %q", byTagOutput)
+	}
+	byTagJSONOutput, err := executeCLI(t, nil, "receipt", "cancel-by-tag", "--json", "release")
+	if err != nil {
+		t.Fatalf("povr receipt cancel-by-tag --json error = %v", err)
+	}
+	var byTagJSON struct {
+		Tag       string `json:"tag"`
+		Cancelled bool   `json:"cancelled"`
+	}
+	if err := json.Unmarshal([]byte(byTagJSONOutput), &byTagJSON); err != nil {
+		t.Fatalf("receipt cancel-by-tag JSON output is not JSON: %v", err)
+	}
+	if byTagJSON.Tag != "release" || !byTagJSON.Cancelled {
+		t.Errorf("receipt cancel-by-tag JSON = %+v", byTagJSON)
 	}
 }
