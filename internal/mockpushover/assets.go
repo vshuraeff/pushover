@@ -1,0 +1,53 @@
+package mockpushover
+
+import (
+	"net/http"
+	"strings"
+)
+
+var fixturePNG = []byte{
+	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+	0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+	0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+	0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+	0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
+	0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0xf0, 0x1f,
+	0x00, 0x05, 0x00, 0x01, 0xff, 0x72, 0x9c, 0x52, 0x67,
+	0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+	0x42, 0x60, 0x82,
+}
+
+var fixtureMP3 = append([]byte{
+	0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0xff, 0xfb, 0x90, 0x64,
+}, make([]byte, 413)...)
+
+func (s *Server) handleIcon(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(s, w, r, http.MethodGet) {
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/icons/")
+	if name == "" || strings.Contains(name, "/") || !strings.HasSuffix(name, ".png") {
+		s.writeError(w, http.StatusNotFound, "request", "asset was not found")
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(fixturePNG)
+}
+
+func (s *Server) handleSoundAsset(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(s, w, r, http.MethodGet) {
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/sounds/")
+	if name == "" || strings.Contains(name, "/") || !strings.HasSuffix(name, ".mp3") {
+		s.writeError(w, http.StatusNotFound, "request", "asset was not found")
+		return
+	}
+	w.Header().Set("Content-Type", "audio/mpeg")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(fixtureMP3)
+}
