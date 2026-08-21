@@ -59,11 +59,18 @@ func (s *FileSessionStore) Save(state *State) (err error) {
 	}
 
 	dir := filepath.Dir(s.statePath)
+	_, statErr := os.Stat(dir)
+	createdDir := errors.Is(statErr, os.ErrNotExist)
+	if statErr != nil && !createdDir {
+		return fmt.Errorf("stat session state directory: %w", statErr)
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create session state directory: %w", err)
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return fmt.Errorf("set session state directory permissions: %w", err)
+	if createdDir {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return fmt.Errorf("set session state directory permissions: %w", err)
+		}
 	}
 
 	lock, err := os.OpenFile(s.lockPath, os.O_CREATE|os.O_RDWR, 0o600)

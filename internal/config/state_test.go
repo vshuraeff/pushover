@@ -36,7 +36,7 @@ func TestFileSessionStoreSaveLoadAndPermissions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			configDir := filepath.Join(t.TempDir(), "config")
-			t.Setenv("POVR_CONFIG_DIR", configDir)
+			t.Setenv("PUSHOVER_CONFIG_DIR", configDir)
 
 			store, err := NewFileSessionStore()
 			if err != nil {
@@ -78,7 +78,7 @@ func TestFileSessionStoreSaveLoadAndPermissions(t *testing.T) {
 }
 
 func TestFileSessionStoreLoadMissing(t *testing.T) {
-	t.Setenv("POVR_CONFIG_DIR", t.TempDir())
+	t.Setenv("PUSHOVER_CONFIG_DIR", t.TempDir())
 	store, err := NewFileSessionStore()
 	if err != nil {
 		t.Fatalf("NewFileSessionStore() error = %v", err)
@@ -91,7 +91,7 @@ func TestFileSessionStoreLoadMissing(t *testing.T) {
 }
 
 func TestFileSessionStoreSaveWaitsForLock(t *testing.T) {
-	t.Setenv("POVR_CONFIG_DIR", t.TempDir())
+	t.Setenv("PUSHOVER_CONFIG_DIR", t.TempDir())
 	store, err := NewFileSessionStore()
 	if err != nil {
 		t.Fatalf("NewFileSessionStore() error = %v", err)
@@ -134,5 +134,29 @@ func TestFileSessionStoreSaveWaitsForLock(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Save() did not finish after releasing lock")
+	}
+}
+
+func TestFileSessionStoreSavePreservesExistingDirectoryPermissions(t *testing.T) {
+	configDir := t.TempDir()
+	if err := os.Chmod(configDir, 0o755); err != nil {
+		t.Fatalf("Chmod(config dir) error = %v", err)
+	}
+	t.Setenv("PUSHOVER_CONFIG_DIR", configDir)
+
+	store, err := NewFileSessionStore()
+	if err != nil {
+		t.Fatalf("NewFileSessionStore() error = %v", err)
+	}
+	if err := store.Save(&State{DeviceID: "test-device-id"}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	info, err := os.Stat(configDir)
+	if err != nil {
+		t.Fatalf("Stat(config dir) error = %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o755 {
+		t.Errorf("config directory permissions = %o, want 755", got)
 	}
 }

@@ -11,15 +11,15 @@ const (
 )
 
 func ConfigDir() (string, error) {
-	if dir := os.Getenv("POVR_CONFIG_DIR"); dir != "" {
+	if dir := os.Getenv("PUSHOVER_CONFIG_DIR"); dir != "" {
 		return dir, nil
 	}
 
-	dir, err := os.UserConfigDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "povr"), nil
+	return filepath.Join(home, ".config", "pushover"), nil
 }
 
 func StateFilePath() (string, error) {
@@ -42,12 +42,18 @@ func APIURL() string {
 	if url := os.Getenv("PUSHOVER_API_URL"); url != "" {
 		return url
 	}
+	if tomlConfig, err := LoadTOMLConfig(); err == nil && tomlConfig.APIURL != "" {
+		return tomlConfig.APIURL
+	}
 	return DefaultAPIURL
 }
 
 func WSURL() string {
 	if url := os.Getenv("PUSHOVER_WS_URL"); url != "" {
 		return url
+	}
+	if tomlConfig, err := LoadTOMLConfig(); err == nil && tomlConfig.WSURL != "" {
+		return tomlConfig.WSURL
 	}
 	return DefaultWSURL
 }

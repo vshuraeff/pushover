@@ -11,37 +11,39 @@ func TestStatePaths(t *testing.T) {
 	tests := []struct {
 		name     string
 		override string
-		want     func(t *testing.T) string
 	}{
 		{
-			name: "default user config directory",
-			want: func(t *testing.T) string {
-				t.Helper()
-				dir, err := os.UserConfigDir()
-				if err != nil {
-					t.Fatalf("UserConfigDir() error = %v", err)
-				}
-				return filepath.Join(dir, "povr", "state.json")
-			},
+			name: "default config directory",
 		},
 		{
 			name:     "config directory override",
 			override: override,
-			want: func(t *testing.T) string {
-				t.Helper()
-				return filepath.Join(override, "state.json")
-			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("POVR_CONFIG_DIR", tt.override)
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("PUSHOVER_CONFIG_DIR", tt.override)
+
+			wantDir := filepath.Join(home, ".config", "pushover")
+			if tt.override != "" {
+				wantDir = tt.override
+			}
+			gotDir, err := ConfigDir()
+			if err != nil {
+				t.Fatalf("ConfigDir() error = %v", err)
+			}
+			if gotDir != wantDir {
+				t.Errorf("ConfigDir() = %q, want %q", gotDir, wantDir)
+			}
+
 			got, err := StateFilePath()
 			if err != nil {
 				t.Fatalf("StateFilePath() error = %v", err)
 			}
-			if want := tt.want(t); got != want {
+			if want := filepath.Join(wantDir, "state.json"); got != want {
 				t.Errorf("StateFilePath() = %q, want %q", got, want)
 			}
 
@@ -57,6 +59,8 @@ func TestStatePaths(t *testing.T) {
 }
 
 func TestEndpoints(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("PUSHOVER_CONFIG_DIR", configDir)
 	t.Setenv("PUSHOVER_API_URL", "")
 	t.Setenv("PUSHOVER_WS_URL", "")
 	if got := APIURL(); got != DefaultAPIURL {
@@ -66,12 +70,24 @@ func TestEndpoints(t *testing.T) {
 		t.Errorf("WSURL() = %q, want %q", got, DefaultWSURL)
 	}
 
-	t.Setenv("PUSHOVER_API_URL", "https://test.invalid/api")
-	t.Setenv("PUSHOVER_WS_URL", "wss://test.invalid/push")
-	if got := APIURL(); got != "https://test.invalid/api" {
-		t.Errorf("APIURL() = %q, want override", got)
+	configPath := filepath.Join(configDir, tomlConfigFileName)
+	contents := []byte("api_url = \"https://file.invalid/api\"\nws_url = \"wss://file.invalid/push\"\n")
+	if err := os.WriteFile(configPath, contents, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if got := WSURL(); got != "wss://test.invalid/push" {
-		t.Errorf("WSURL() = %q, want override", got)
+	if got := APIURL(); got != "https://file.invalid/api" {
+		t.Errorf("APIURL() = %q, want TOML value", got)
+	}
+	if got := WSURL(); got != "wss://file.invalid/push" {
+		t.Errorf("WSURL() = %q, want TOML value", got)
+	}
+
+	t.Setenv("PUSHOVER_API_URL", "https://env.invalid/api")
+	t.Setenv("PUSHOVER_WS_URL", "wss://env.invalid/push")
+	if got := APIURL(); got != "https://env.invalid/api" {
+		t.Errorf("APIURL() = %q, want environment override", got)
+	}
+	if got := WSURL(); got != "wss://env.invalid/push" {
+		t.Errorf("WSURL() = %q, want environment override", got)
 	}
 }
