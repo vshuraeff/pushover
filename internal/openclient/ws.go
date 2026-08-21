@@ -3,6 +3,7 @@ package openclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
@@ -48,6 +49,16 @@ type Engine struct {
 
 // run connects and processes websocket frames until cancellation or a terminal frame.
 func (e *Engine) Run(ctx context.Context) error {
+	if e.URL == "" {
+		return fmt.Errorf("websocket url is required")
+	}
+	if e.DeviceID == "" {
+		return fmt.Errorf("websocket device id is required")
+	}
+	if e.Secret == "" {
+		return fmt.Errorf("websocket secret is required")
+	}
+
 	clock := e.Clock
 	if clock == nil {
 		clock = realClock{}
@@ -71,6 +82,7 @@ func (e *Engine) Run(ctx context.Context) error {
 
 		conn, _, err := dial(ctx, e.URL)
 		if err != nil {
+			logger.Warn("websocket dial failed", "attempt", attempt, "err", err)
 			if conn != nil {
 				_ = conn.CloseNow()
 			}
@@ -86,7 +98,7 @@ func (e *Engine) Run(ctx context.Context) error {
 
 		outcome, stable := func() (connectionOutcome, bool) {
 			defer conn.CloseNow()
-			return e.serve(ctx, conn, clock, logger)
+			return e.serve(ctx, conn, clock, logger, attempt)
 		}()
 
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -126,9 +138,10 @@ type readResult struct {
 	err     error
 }
 
-func (e *Engine) serve(ctx context.Context, conn *websocket.Conn, clock Clock, logger *slog.Logger) (connectionOutcome, bool) {
+func (e *Engine) serve(ctx context.Context, conn *websocket.Conn, clock Clock, logger *slog.Logger, attempt uint) (connectionOutcome, bool) {
 	login := []byte("login:" + e.DeviceID + ":" + e.Secret + "\n")
 	if err := conn.Write(ctx, websocket.MessageBinary, login); err != nil {
+		logger.Warn("websocket login write failed", "attempt", attempt, "err", err)
 		return connectionFailed, false
 	}
 
@@ -149,6 +162,7 @@ func (e *Engine) serve(ctx context.Context, conn *websocket.Conn, clock Clock, l
 			return connectionFailed, true
 		case result := <-reads:
 			if result.err != nil {
+				logger.Debug("websocket read failed", "attempt", attempt, "err", result.err)
 				return connectionFailed, clock.Now().Sub(connectedAt) >= livenessTimeout
 			}
 			resetTimer(liveness, livenessTimeout)

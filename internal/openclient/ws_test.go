@@ -1,9 +1,11 @@
 package openclient
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -124,6 +126,37 @@ func TestWebSocketEngine(t *testing.T) {
 		cancel()
 	})
 
+	t.Run("keepalive frame resets liveness timer", func(t *testing.T) {
+		server := newWebSocketTestServer(t)
+		clock := newFakeClock()
+		engine := testEngine(server.url(), clock)
+		cancel, _ := runTestEngine(t, engine)
+
+		conn := server.nextConnection(t)
+		if duration := clock.nextRequest(t); duration != livenessTimeout {
+			t.Fatalf("liveness timer duration = %v, want %v", duration, livenessTimeout)
+		}
+		clock.Advance(59 * time.Second)
+		conn.sendFrame(t, '#')
+		if duration := clock.nextRequest(t); duration != livenessTimeout {
+			t.Fatalf("reset liveness timer duration = %v, want %v", duration, livenessTimeout)
+		}
+		clock.Advance(59 * time.Second)
+		server.expectNoConnection(t)
+
+		clock.Advance(2 * time.Second)
+		delay := clock.nextRequest(t)
+		if delay < 0 || delay >= backoffBase {
+			t.Fatalf("reconnect delay = %v, want [0, %v)", delay, backoffBase)
+		}
+		clock.Advance(delay)
+		server.nextConnection(t)
+		if got := server.connectionCount.Load(); got != 2 {
+			t.Errorf("connection count = %d, want 2", got)
+		}
+		cancel()
+	})
+
 	t.Run("network failures use capped exponential full jitter", func(t *testing.T) {
 		clock := newFakeClock()
 		dials := make(chan struct{}, 16)
@@ -151,6 +184,116 @@ func TestWebSocketEngine(t *testing.T) {
 			previousBound = bound
 			clock.Advance(delay)
 			waitForSignal(t, dials, fmt.Sprintf("dial after attempt %d", attempt))
+		}
+		cancel()
+		if err := waitForRunResult(t, result); !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run() error = %v, want context.Canceled", err)
+		}
+	})
+
+	t.Run("stable connection resets backoff to base", func(t *testing.T) {
+		server := newWebSocketTestServer(t)
+		clock := newFakeClock()
+		var dialCount atomic.Int32
+		engine := testEngine(server.url(), clock)
+		engine.Dialer = func(ctx context.Context, url string) (*websocket.Conn, *http.Response, error) {
+			if dialCount.Add(1) <= 2 {
+				return nil, nil, errors.New("forced dial failure")
+			}
+			return websocket.Dial(ctx, url, nil)
+		}
+		cancel, _ := runTestEngine(t, engine)
+
+		for attempt := uint(0); attempt < 2; attempt++ {
+			delay := clock.nextRequest(t)
+			if delay < 0 || delay >= expectedBackoffBound(attempt) {
+				t.Fatalf("attempt %d delay = %v, want [0, %v)", attempt, delay, expectedBackoffBound(attempt))
+			}
+			clock.Advance(delay)
+		}
+
+		conn := server.nextConnection(t)
+		if duration := clock.nextRequest(t); duration != livenessTimeout {
+			t.Fatalf("liveness timer duration = %v, want %v", duration, livenessTimeout)
+		}
+		clock.Advance(59 * time.Second)
+		conn.sendFrame(t, '#')
+		if duration := clock.nextRequest(t); duration != livenessTimeout {
+			t.Fatalf("reset liveness timer duration = %v, want %v", duration, livenessTimeout)
+		}
+		clock.Advance(time.Second)
+		if err := conn.conn.CloseNow(); err != nil {
+			t.Fatalf("close websocket connection: %v", err)
+		}
+
+		delay := clock.nextRequest(t)
+		if delay < 0 || delay >= backoffBase {
+			t.Fatalf("backoff after stable connection = %v, want [0, %v)", delay, backoffBase)
+		}
+		cancel()
+	})
+
+	t.Run("run validates required fields", func(t *testing.T) {
+		tests := []struct {
+			name string
+			set  func(*Engine)
+		}{
+			{
+				name: "url",
+				set:  func(engine *Engine) { engine.URL = "" },
+			},
+			{
+				name: "device id",
+				set:  func(engine *Engine) { engine.DeviceID = "" },
+			},
+			{
+				name: "secret",
+				set:  func(engine *Engine) { engine.Secret = "" },
+			},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				engine := testEngine("ws://example.invalid", newFakeClock())
+				test.set(engine)
+				dialed := false
+				engine.Dialer = func(context.Context, string) (*websocket.Conn, *http.Response, error) {
+					dialed = true
+					return nil, nil, errors.New("unexpected dial")
+				}
+
+				if err := engine.Run(context.Background()); err == nil {
+					t.Fatal("Run() error = nil, want validation error")
+				}
+				if dialed {
+					t.Fatal("Run() attempted a dial after validation failed")
+				}
+			})
+		}
+	})
+
+	t.Run("reconnect attempts are logged without leaking the secret", func(t *testing.T) {
+		clock := newFakeClock()
+		var logBuf bytes.Buffer
+		engine := testEngine("ws://example.invalid", clock)
+		engine.Logger = slog.New(slog.NewTextHandler(&logBuf, nil))
+		engine.Dialer = func(context.Context, string) (*websocket.Conn, *http.Response, error) {
+			return nil, nil, errors.New("forced dial failure")
+		}
+		cancel, result := runTestEngine(t, engine)
+
+		clock.nextRequest(t)
+		if logBuf.Len() == 0 {
+			t.Fatal("expected dial failure to be logged")
+		}
+		if !bytes.Contains(logBuf.Bytes(), []byte("forced dial failure")) {
+			t.Fatalf("log output did not include the dial failure: %q", logBuf.String())
+		}
+		if !bytes.Contains(logBuf.Bytes(), []byte("attempt")) {
+			t.Fatalf("log output did not include the attempt: %q", logBuf.String())
+		}
+		if bytes.Contains(logBuf.Bytes(), []byte(testSecret)) {
+			t.Fatal("log output leaked the websocket secret")
 		}
 		cancel()
 		if err := waitForRunResult(t, result); !errors.Is(err, context.Canceled) {
