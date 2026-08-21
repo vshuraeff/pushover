@@ -73,6 +73,37 @@ func TestClientRegisterRejectsInvalidNameBeforeRequest(t *testing.T) {
 	}
 }
 
+func TestClientRegisterAfterPTYLoginStoresDevice(t *testing.T) {
+	const deviceName = "e2e-device"
+
+	h := newHarness(t, defaultSeed())
+	login := runViaPTY(t, h.env, []string{"client", "login"}, []string{fixtureEmail, fixturePassword})
+	requireSuccess(t, login)
+
+	result := h.run(t, "client", "register", "--name", deviceName)
+	requireSuccess(t, result)
+
+	state := readState(t, h.configDir)
+	if state.DeviceID == "" {
+		t.Fatal("registration state did not contain a device id")
+	}
+	if state.DeviceName != deviceName {
+		t.Fatalf("registration state device name = %q, want %q", state.DeviceName, deviceName)
+	}
+
+	requests := h.requests(t)
+	if len(requests) != 2 {
+		t.Fatalf("login and registration request count = %d, want 2", len(requests))
+	}
+	if requests[0].Method != http.MethodPost || requests[0].Path != "/1/users/login.json" {
+		t.Fatalf("login request = %s %s", requests[0].Method, requests[0].Path)
+	}
+	if requests[1].Method != http.MethodPost || requests[1].Path != "/1/devices.json" {
+		t.Fatalf("registration request = %s %s", requests[1].Method, requests[1].Path)
+	}
+	requireField(t, requests[1], "os", "O")
+}
+
 func TestClientFetchPrintsMessagesThenUpdatesHighest(t *testing.T) {
 	seed := defaultSeed()
 	seed.Queues = map[string][]mockpushover.Message{
