@@ -13,10 +13,9 @@ import (
 
 func TestGroupFullLifecycle(t *testing.T) {
 	h := newHarness(t, defaultSeed())
-	baseURL := h.server.URL() + "/1"
 	runGroup := func(args ...string) commandResult {
 		t.Helper()
-		prefix := []string{"group", "--api-base-url", baseURL, "--json"}
+		prefix := []string{"group", "--json"}
 		return h.run(t, append(prefix, args...)...)
 	}
 

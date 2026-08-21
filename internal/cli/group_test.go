@@ -132,6 +132,7 @@ func executeGroupCommand(t *testing.T, serverURL string, args ...string) (string
 	t.Helper()
 	t.Setenv("PUSHOVER_CONFIG_DIR", t.TempDir())
 	t.Setenv(testGroupTokenEnv, "test-app-token-0000000000000000000")
+	t.Setenv("PUSHOVER_API_URL", serverURL)
 
 	cmd := NewRootCommand()
 	Register(cmd)
@@ -140,7 +141,7 @@ func executeGroupCommand(t *testing.T, serverURL string, args ...string) (string
 	var output bytes.Buffer
 	cmd.SetOut(&output)
 	cmd.SetErr(io.Discard)
-	baseArgs := []string{"--token-env", testGroupTokenEnv, "group", "--api-base-url", serverURL + "/1"}
+	baseArgs := []string{"--token-env", testGroupTokenEnv, "group"}
 	cmd.SetArgs(append(baseArgs, args...))
 	err := cmd.Execute()
 	return output.String(), err
