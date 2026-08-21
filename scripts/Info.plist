@@ -6,6 +6,8 @@
 	<string>povr-helper</string>
 	<key>CFBundleIdentifier</key>
 	<string>net.vshuraeff.povr.helper</string>
+	<key>CFBundleIconFile</key>
+	<string>povr</string>
 	<key>CFBundleName</key>
 	<string>Povr</string>
 	<key>CFBundlePackageType</key>
