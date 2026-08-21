@@ -20,9 +20,9 @@ const (
 
 // rate limits contains the application rate-limit headers returned by pushover.
 type RateLimits struct {
-	Limit     string
-	Remaining string
-	Reset     string
+	Limit     string `json:"limit"`
+	Remaining string `json:"remaining"`
+	Reset     string `json:"reset"`
 }
 
 // response is the common result envelope returned by client helpers.
