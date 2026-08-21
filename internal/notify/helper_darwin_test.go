@@ -40,12 +40,20 @@ func TestHelperNotifierProtocolRoundTrip(t *testing.T) {
 		AttachmentPath: "attachment.png",
 		SoundName:      "povr-alarm.caf",
 		SoundPath:      "ignored.mp3",
-		Priority:       1,
+		Priority:       2,
 		URL:            "https://example.test/notification",
 		ThreadID:       "thread",
 	})
 	if err != nil {
 		t.Fatalf("Notify() error = %v", err)
+	}
+	select {
+	case event := <-notifier.Actions():
+		if event.ID != "round-trip" || event.Action != "ack" || event.Thread != "thread" {
+			t.Fatalf("Actions() event = %#v", event)
+		}
+	case <-ctx.Done():
+		t.Fatalf("Actions() timeout: %v", ctx.Err())
 	}
 
 	err = notifier.Notify(ctx, Notification{ID: "error", Title: "title", Body: "body"})
@@ -69,8 +77,21 @@ func TestHelperNotifierCloseBeforeStart(t *testing.T) {
 	if err := notifier.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
+	if _, ok := <-notifier.Actions(); ok {
+		t.Fatal("Actions() channel remained open after Close()")
+	}
 	if err := notifier.Notify(context.Background(), Notification{}); !errors.Is(err, ErrHelperClosed) {
 		t.Fatalf("Notify() error = %v, want %v", err, ErrHelperClosed)
+	}
+}
+
+func TestHelperNotifierRequestCategory(t *testing.T) {
+	notifier := newHelperNotifier(nil)
+	if got := notifier.request(Notification{Priority: 2}).Category; got != "povr.emergency" {
+		t.Fatalf("emergency category = %q, want %q", got, "povr.emergency")
+	}
+	if got := notifier.request(Notification{Priority: 1}).Category; got != "" {
+		t.Fatalf("high-priority category = %q, want empty", got)
 	}
 }
 
@@ -118,12 +139,14 @@ func TestHelperSubprocess(t *testing.T) {
 			request.Sound.File == "" &&
 			request.Level == "timeSensitive" &&
 			request.Thread == "thread" &&
-			request.URL == "https://example.test/notification"
+			request.URL == "https://example.test/notification" &&
+			request.Category == "povr.emergency"
 		if !valid {
 			_ = encoder.Encode(HelperEvent{Event: "error", ID: request.ID, Error: "request mismatch"})
 			continue
 		}
 		_ = encoder.Encode(HelperEvent{Event: "delivered", ID: request.ID})
+		_ = encoder.Encode(HelperEvent{Event: "action", Action: "ack", ID: request.ID, Thread: request.Thread})
 	}
 	if err := scanner.Err(); err != nil {
 		os.Exit(3)

@@ -93,8 +93,12 @@ func Run(ctx context.Context, daemon *Daemon) error {
 		secret:      state.Secret,
 		deviceID:    state.DeviceID,
 	})
+	var actionDone chan struct{}
 	defer func() {
 		cancel()
+		if actionDone != nil {
+			<-actionDone
+		}
 		syncer.stopAndWait()
 		<-emergencyDone
 	}()
@@ -104,6 +108,14 @@ func Run(ctx context.Context, daemon *Daemon) error {
 			return nil
 		}
 		return errors.New(redactError(err, state.Secret, state.DeviceID))
+	}
+
+	if source, ok := daemon.Notifier.(notify.ActionSource); ok {
+		actionDone = make(chan struct{})
+		go func() {
+			runActions(runCtx, source.Actions(), daemon.APIClient, state.Secret, state.DeviceID, syncer.trigger, logger)
+			close(actionDone)
+		}()
 	}
 
 	engine := &openclient.Engine{

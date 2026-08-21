@@ -33,7 +33,7 @@ func TestSelectBackendOverride(t *testing.T) {
 		wantErr  bool
 		wantCaps Caps
 	}{
-		{name: "helper", backend: "helper", wantErr: runtime.GOOS != "darwin", wantCaps: Caps{Images: true, Sound: true, Levels: true, Actions: false}},
+		{name: "helper", backend: "helper", wantErr: runtime.GOOS != "darwin", wantCaps: Caps{Images: true, Sound: true, Levels: true, Actions: true}},
 		{name: "alerter", backend: "alerter", wantErr: runtime.GOOS != "darwin", wantCaps: Caps{Images: true, Sound: true}},
 		{name: "osascript", backend: "osascript", wantErr: runtime.GOOS != "darwin", wantCaps: Caps{Sound: true}},
 		{name: "file", backend: "file:" + filePath, wantCaps: Caps{Images: true, Sound: true, Levels: true}},
