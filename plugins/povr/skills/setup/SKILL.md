@@ -48,11 +48,12 @@ file moves with it).
 Write the file with your own file tools — this skill runs no file writes:
 
 ```toml
-app_token  = "..."
-user_key   = "..."
-team_token = "..."
-api_url    = "https://api.pushover.net"
-ws_url     = "wss://client.pushover.net/push"
+app_token     = "..."
+user_key      = "..."
+team_token    = "..."
+api_url       = "https://api.pushover.net"
+ws_url        = "wss://client.pushover.net/push"
+session_store = "file" # or "keychain" to use the macOS Keychain for the session
 ```
 
 All keys are optional; `api_url` and `ws_url` override the built-in endpoints and are

@@ -109,6 +109,7 @@ team_token     = "t0000000000000000000000000000"
 encryption_key = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 api_url        = "https://api.pushover.net"
 ws_url         = "wss://client.pushover.net/push"
+session_store  = "file" # or "keychain" (macOS only)
 ```
 
 All keys are optional. `api_url` and `ws_url` override the built-in endpoints and are
@@ -123,7 +124,9 @@ The file matters most for daemon or launchd runs, where no environment is inheri
 `povr` creates it, a pre-existing one keeps its own permissions) holding the device id,
 device name, session secret and last processed message id. **The account password is
 never stored** — only the secret the server returns. Set `PUSHOVER_CONFIG_DIR` to move
-both the config file and the state file elsewhere.
+both the config file and the state file elsewhere. Set `session_store = "keychain"`
+(or `PUSHOVER_SESSION_STORE=keychain`) to keep the session in the macOS Keychain
+instead of `state.json`; an unrecognized value makes all client commands fail closed.
 
 ## Command reference
 
