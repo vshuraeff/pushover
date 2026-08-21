@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -123,7 +124,7 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values, options
 		}
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, redactRequestError(err)
 		}
 		request.Header.Set("User-Agent", c.userAgent)
 		return request, nil, nil
@@ -140,7 +141,7 @@ func (c *Client) PostForm(ctx context.Context, path string, values url.Values, o
 		}
 		request, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL.String(), strings.NewReader(encoded))
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, redactRequestError(err)
 		}
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		request.Header.Set("User-Agent", c.userAgent)
@@ -185,7 +186,7 @@ func (c *Client) PostMultipart(ctx context.Context, path string, fields url.Valu
 		if err != nil {
 			_ = reader.Close()
 			<-done
-			return nil, nil, err
+			return nil, nil, redactRequestError(err)
 		}
 		request.Header.Set("Content-Type", multipartWriter.FormDataContentType())
 		request.Header.Set("User-Agent", c.userAgent)
@@ -239,7 +240,7 @@ func (c *Client) do(ctx context.Context, options []RequestOption, makeRequest fu
 				c.sleep(c.retryDelay(attempt))
 				continue
 			}
-			return nil, err
+			return nil, redactRequestError(err)
 		}
 
 		response, err := responseFromHTTP(httpResponse)
@@ -267,14 +268,14 @@ func (c *Client) retryDelay(attempt int) time.Duration {
 func (c *Client) requestURL(path string, query url.Values) (*url.URL, error) {
 	base, err := url.Parse(c.baseURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse api base URL: %w", err)
+		return nil, fmt.Errorf("parse api base URL: %w", redactRequestError(err))
 	}
 	if base.Scheme == "" || base.Host == "" {
 		return nil, fmt.Errorf("api base URL must be absolute")
 	}
 	reference, err := url.Parse(path)
 	if err != nil {
-		return nil, fmt.Errorf("parse request path: %w", err)
+		return nil, fmt.Errorf("parse request path: %w", redactRequestError(err))
 	}
 	if reference.IsAbs() || reference.Host != "" {
 		return nil, fmt.Errorf("request path must be relative to the API base URL")
@@ -282,6 +283,7 @@ func (c *Client) requestURL(path string, query url.Values) (*url.URL, error) {
 
 	base.Path = strings.TrimRight(base.Path, "/") + "/"
 	reference.Path = strings.TrimLeft(reference.Path, "/")
+	reference.RawPath = strings.TrimLeft(reference.RawPath, "/")
 	requestURL := base.ResolveReference(reference)
 	values := requestURL.Query()
 	for name, entries := range query {
@@ -291,6 +293,77 @@ func (c *Client) requestURL(path string, query url.Values) (*url.URL, error) {
 	}
 	requestURL.RawQuery = values.Encode()
 	return requestURL, nil
+}
+
+func redactRequestError(err error) error {
+	var urlError *url.Error
+	if !errors.As(err, &urlError) {
+		return err
+	}
+
+	redacted := *urlError
+	redacted.URL = redactURLQuery(urlError.URL)
+	return &redacted
+}
+
+func redactURLQuery(rawURL string) string {
+	requestURL, err := url.Parse(rawURL)
+	if err != nil {
+		return redactRawURLQuery(rawURL)
+	}
+
+	query := requestURL.Query()
+	redacted := false
+	for name, values := range query {
+		if !isSensitiveQueryParameter(name) {
+			continue
+		}
+		for index := range values {
+			values[index] = "REDACTED"
+		}
+		query[name] = values
+		redacted = true
+	}
+	if !redacted {
+		return redactRawURLQuery(rawURL)
+	}
+	requestURL.RawQuery = query.Encode()
+	return requestURL.String()
+}
+
+func redactRawURLQuery(rawURL string) string {
+	queryStart := strings.IndexByte(rawURL, '?')
+	if queryStart == -1 {
+		return rawURL
+	}
+
+	prefix := rawURL[:queryStart+1]
+	queryAndFragment := rawURL[queryStart+1:]
+	fragmentStart := strings.IndexByte(queryAndFragment, '#')
+	fragment := ""
+	if fragmentStart != -1 {
+		fragment = queryAndFragment[fragmentStart:]
+		queryAndFragment = queryAndFragment[:fragmentStart]
+	}
+
+	entries := strings.Split(queryAndFragment, "&")
+	for index, entry := range entries {
+		name, _, hasValue := strings.Cut(entry, "=")
+		unescapedName, err := url.QueryUnescape(name)
+		if err == nil && hasValue && isSensitiveQueryParameter(unescapedName) {
+			entries[index] = name + "=REDACTED"
+		}
+	}
+	return prefix + strings.Join(entries, "&") + fragment
+}
+
+func isSensitiveQueryParameter(name string) bool {
+	switch strings.ToLower(name) {
+	case "access_token", "api_key", "apikey", "authorization", "client_secret", "password", "refresh_token", "secret", "token", "user":
+		return true
+	default:
+		return false
+	}
 }
 
 func responseFromHTTP(httpResponse *http.Response) (*Response, error) {

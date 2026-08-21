@@ -205,8 +205,7 @@ func groupClient(cmd *cobra.Command) (*api.Client, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	baseURL := strings.TrimRight(config.APIURL(), "/") + "/1"
-	return api.New(baseURL, Version), appToken, nil
+	return api.New(config.APIURL(), Version), appToken, nil
 }
 
 func groupContext(cmd *cobra.Command) context.Context {

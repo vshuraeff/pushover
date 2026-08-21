@@ -84,5 +84,6 @@ unix seconds, and `--device` narrows delivery to one registered device name.
   `expire must be between 1 and 10800 for emergency priority` — priority 2 without a
   valid re-alert window.
 - `message exceeds 1024 runes` — shorten the body, or move the detail behind `--url`.
-- `message limit reached; resets at <time>` — the application's quota is spent.
+- `pushover api error: <messages> (resets at <unix>) (request <id>)` — the application's quota is spent.
+- `pushover quota exceeded (resets at <unix>)` — the application's quota is spent.
   `povr limits` prints the quota, what remains, and the reset timestamp.

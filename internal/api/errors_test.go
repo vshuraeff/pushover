@@ -55,3 +55,27 @@ func TestQuotaErrorIncludesAPIMessageAndReset(t *testing.T) {
 		}
 	}
 }
+
+func TestQuotaErrorOrdersResetBeforeRequest(t *testing.T) {
+	const reset = "1900000123"
+	const request = "request-test-id"
+	const resetSegment = "(resets at " + reset + ")"
+
+	withoutAPIError := (&QuotaError{Reset: reset}).Error()
+	withAPIError := (&QuotaError{
+		Reset: reset,
+		APIError: &APIError{
+			Request: request,
+			Errors:  ErrorMessages{generalErrorsKey: {"monthly message limit exceeded"}},
+		},
+	}).Error()
+
+	for _, message := range []string{withoutAPIError, withAPIError} {
+		if !strings.Contains(message, resetSegment) {
+			t.Errorf("Error() = %q, want reset segment %q", message, resetSegment)
+		}
+	}
+	if resetIndex, requestIndex := strings.Index(withAPIError, resetSegment), strings.Index(withAPIError, "(request "+request+")"); resetIndex == -1 || requestIndex == -1 || resetIndex > requestIndex {
+		t.Errorf("Error() = %q, want reset segment before request segment", withAPIError)
+	}
+}
