@@ -3,7 +3,9 @@ package mockpushover
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
+	"image/png"
 	"io"
 	"net/http"
 	"net/url"
@@ -235,10 +237,21 @@ func TestAssets(t *testing.T) {
 	tests := []struct {
 		path        string
 		contentType string
-		prefix      []byte
+		validate    func(*testing.T, []byte)
 	}{
-		{path: "/icons/test-icon.png", contentType: "image/png", prefix: []byte{0x89, 'P', 'N', 'G'}},
-		{path: "/sounds/bike.mp3", contentType: "audio/mpeg", prefix: []byte("ID3")},
+		{
+			path: "/icons/test-icon.png", contentType: "image/png",
+			validate: func(t *testing.T, body []byte) {
+				t.Helper()
+				if _, err := png.Decode(bytes.NewReader(body)); err != nil {
+					t.Fatalf("png.Decode() error = %v", err)
+				}
+			},
+		},
+		{
+			path: "/sounds/bike.mp3", contentType: "audio/mpeg",
+			validate: validateMP3Fixture,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.path, func(t *testing.T) {
@@ -251,9 +264,48 @@ func TestAssets(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ReadAll() error = %v", err)
 			}
-			if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != test.contentType || !bytes.HasPrefix(body, test.prefix) {
+			if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != test.contentType {
 				t.Fatalf("status = %d, content-type = %q, body = %x", response.StatusCode, response.Header.Get("Content-Type"), body)
 			}
+			test.validate(t, body)
 		})
+	}
+}
+
+func validateMP3Fixture(t *testing.T, data []byte) {
+	t.Helper()
+	if len(data) < 14 || string(data[:3]) != "ID3" {
+		t.Fatalf("mp3 fixture has no complete id3 and mpeg headers: %x", data)
+	}
+	for _, value := range data[6:10] {
+		if value&0x80 != 0 {
+			t.Fatalf("id3 size is not syncsafe: %x", data[6:10])
+		}
+	}
+	tagSize := int(data[6])<<21 | int(data[7])<<14 | int(data[8])<<7 | int(data[9])
+	frameOffset := 10 + tagSize
+	if len(data) < frameOffset+4 {
+		t.Fatal("mp3 fixture has no complete frame header after id3 tag")
+	}
+	header := binary.BigEndian.Uint32(data[frameOffset : frameOffset+4])
+	if header&0xffe00000 != 0xffe00000 {
+		t.Fatalf("mpeg frame sync is invalid: %08x", header)
+	}
+	version := (header >> 19) & 0x3
+	layer := (header >> 17) & 0x3
+	if version != 0x3 || layer != 0x1 {
+		t.Fatalf("mpeg frame is not mpeg-1 layer iii: %08x", header)
+	}
+	bitrates := [...]int{0, 32_000, 40_000, 48_000, 56_000, 64_000, 80_000, 96_000, 112_000, 128_000, 160_000, 192_000, 224_000, 256_000, 320_000, 0}
+	sampleRates := [...]int{44_100, 48_000, 32_000, 0}
+	bitrate := bitrates[(header>>12)&0xf]
+	sampleRate := sampleRates[(header>>10)&0x3]
+	if bitrate == 0 || sampleRate == 0 {
+		t.Fatalf("mpeg frame bitrate or sample rate is invalid: %08x", header)
+	}
+	padding := int((header >> 9) & 0x1)
+	frameLength := 144*bitrate/sampleRate + padding
+	if got := len(data) - frameOffset; got != frameLength {
+		t.Fatalf("mpeg frame length = %d, want %d", got, frameLength)
 	}
 }
