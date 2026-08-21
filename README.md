@@ -261,12 +261,27 @@ povr client register --name laptop # 1-25 characters, letters, digits, _ and -
 povr client listen
 ```
 
-`login` stores only the returned session secret. `register` creates an Open Client
-device and stores its id. `listen` then delivers the queued backlog, keeps the
-websocket connection open, downloads message icons and sounds into the user cache
-directory (`povr/icons`, `povr/sounds`), and posts a native notification per message.
-Messages that cannot be delivered are appended to
-`~/.config/pushover/deadletter.jsonl`.
+`login` posts to `/1/users/login.json`; when the server answers `412` it prompts once for
+a two-factor code and retries. `register` posts to `/1/devices.json` with `os=O`. Both
+write to the configured [session store](#session-state). `listen` first fetches the
+queued backlog, then opens the websocket and sends `login:<device id>:<secret>` for live
+delivery; it downloads message icons and sounds into the user cache directory
+(`povr/icons`, `povr/sounds`) and posts a native notification per message. Messages that
+cannot be delivered are appended to `~/.config/pushover/deadletter.jsonl`.
+
+Per Pushover's Open Client API documentation an Open Client device (`os=O`) counts as the
+**Desktop** platform, so a Desktop user license covers a device registered by `povr`
+(see [Licensing](#licensing)).
+
+The server then drives the connection with single-character frames:
+
+| Frame | Meaning |
+| --- | --- |
+| `#` | keepalive |
+| `!` | new messages — fetch `/1/messages.json`, then confirm with `update_highest_message` |
+| `R` | reconnect immediately |
+| `E` | session permanently rejected; `listen` exits |
+| `A` | session taken over by another connection; `listen` exits without reconnecting |
 
 One-shot alternatives, useful for scripts:
 
