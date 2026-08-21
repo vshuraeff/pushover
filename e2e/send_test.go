@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -190,26 +189,14 @@ func TestSendQuotaExhaustionReportsResetContext(t *testing.T) {
 		t.Fatal("quota-exhausted send unexpectedly succeeded")
 	}
 	stderr := strings.ToLower(result.stderr)
-	if !strings.Contains(stderr, "quota") && !strings.Contains(stderr, "has no remaining message quota") {
+	if !strings.Contains(stderr, "quota") {
 		t.Fatalf("stderr did not describe quota exhaustion: %s", result.stderr)
+	}
+	if !strings.Contains(result.stderr, "1900000123") {
+		t.Fatalf("stderr did not report quota reset time: %s", result.stderr)
 	}
 	requests := h.requests(t)
 	if len(requests) != 1 || requests[0].Path != "/1/messages.json" {
 		t.Fatalf("quota request count/path did not match the expected 429 flow")
-	}
-
-	// quotaerror.error currently drops reset when the body also carries an api error; assert the response header pending an out-of-scope internal/api fix.
-	response, err := http.PostForm(h.server.URL()+"/1/messages.json", url.Values{
-		"token": {fixtureAppToken}, "user": {fixtureUserKey}, "message": {"raw quota probe"},
-	})
-	if err != nil {
-		t.Fatalf("send raw quota probe: %v", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("raw quota probe status = %d, want 429", response.StatusCode)
-	}
-	if reset := response.Header.Get("X-Limit-App-Reset"); reset != "1900000123" {
-		t.Fatalf("raw quota reset header = %q, want 1900000123", reset)
 	}
 }

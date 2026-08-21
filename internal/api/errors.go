@@ -83,7 +83,11 @@ func (e *QuotaError) Error() string {
 		return ""
 	}
 	if e.APIError != nil {
-		return e.APIError.Error()
+		message := e.APIError.Error()
+		if e.Reset != "" {
+			message += " (message limit reached; resets at " + e.Reset + ")"
+		}
+		return message
 	}
 	if e.Reset != "" {
 		return "pushover quota exceeded (reset " + e.Reset + ")"
