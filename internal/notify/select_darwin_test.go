@@ -19,8 +19,12 @@ func TestSelectDarwinDefaultOrder(t *testing.T) {
 	t.Run("helper before alerter", func(t *testing.T) {
 		home := t.TempDir()
 		bundlePath := filepath.Join(home, "Library", "Application Support", "povr", "Povr.app")
-		if err := os.MkdirAll(bundlePath, 0o755); err != nil {
+		helperDir := filepath.Join(bundlePath, "Contents", "MacOS")
+		if err := os.MkdirAll(helperDir, 0o755); err != nil {
 			t.Fatalf("MkdirAll() error = %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(helperDir, "povr-helper"), []byte("helper"), 0o755); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
 		}
 		t.Setenv("HOME", home)
 		t.Setenv("PATH", binDir)
