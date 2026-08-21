@@ -114,6 +114,62 @@ func TestClientFetchWritesJSONBeforeUpdatingHighest(t *testing.T) {
 	}
 }
 
+func TestClientFetchEmptyQueueOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/1/messages.json":
+			if request.URL.Query().Get("secret") != "fake-secret-123" || request.URL.Query().Get("device_id") != "fake-device-123" {
+				t.Error("fetch did not use the stored session")
+			}
+			_, _ = writer.Write([]byte(`{"status":1}`))
+		default:
+			writer.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	for _, test := range []struct {
+		name       string
+		args       []string
+		wantOutput string
+	}{
+		{
+			name:       "json",
+			args:       []string{"client", "fetch", "--json"},
+			wantOutput: "[]\n",
+		},
+		{
+			name:       "table",
+			args:       []string{"client", "fetch"},
+			wantOutput: "ID  DATE  PRIORITY  APP  TITLE  MESSAGE\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("PUSHOVER_CONFIG_DIR", t.TempDir())
+			t.Setenv("PUSHOVER_API_URL", server.URL)
+
+			store, err := config.NewFileSessionStore()
+			if err != nil {
+				t.Fatalf("NewFileSessionStore() error = %v", err)
+			}
+			if err := store.Save(&config.State{Secret: "fake-secret-123", DeviceID: "fake-device-123", DeviceName: "desktop_1"}); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+
+			root, output, stderr := clientRoot(test.args)
+			if err := root.Execute(); err != nil {
+				t.Fatalf("Execute() error = %v", err)
+			}
+			if got := output.String(); got != test.wantOutput {
+				t.Errorf("output = %q, want %q", got, test.wantOutput)
+			}
+			if strings.Contains(output.String(), "fake-secret-123") || strings.Contains(stderr.String(), "fake-secret-123") {
+				t.Error("command output contained the fixture secret")
+			}
+		})
+	}
+}
+
 func clientRoot(args []string) (*cobra.Command, *bytes.Buffer, *bytes.Buffer) {
 	root := NewRootCommand()
 	Register(root)
