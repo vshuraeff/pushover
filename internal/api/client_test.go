@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -115,6 +116,45 @@ func TestNoRetry(t *testing.T) {
 	}
 	if got := hits.Load(); got != 1 {
 		t.Errorf("handler hits = %d, want 1", got)
+	}
+}
+
+func TestNetworkErrorRedactsQueryCredentials(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	const (
+		appToken = "test-app-token-must-not-appear-in-errors"
+		userKey  = "test-user-key-must-not-appear-in-errors"
+	)
+	_, err = newTestClient("http://"+address).Get(
+		context.Background(),
+		"/1/limits.json",
+		url.Values{"token": {appToken}, "user": {userKey}},
+		NoRetry(),
+	)
+	if err == nil {
+		t.Fatal("Get() error = nil, want network error")
+	}
+	for _, credential := range []string{appToken, userKey} {
+		if strings.Contains(err.Error(), credential) {
+			t.Error("Get() error contains a query credential")
+		}
+	}
+	var urlError *url.Error
+	if !errors.As(err, &urlError) {
+		t.Fatalf("Get() error type = %T, want wrapped *url.Error", err)
+	}
+	for _, credential := range []string{appToken, userKey} {
+		if strings.Contains(urlError.URL, credential) {
+			t.Error("url error URL contains a query credential")
+		}
 	}
 }
 

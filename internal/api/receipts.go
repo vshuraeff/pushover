@@ -24,7 +24,7 @@ type Receipt struct {
 }
 
 func (c *Client) ReceiptStatus(ctx context.Context, token, receipt string, options ...RequestOption) (*Receipt, error) {
-	response, err := c.Get(ctx, "1/receipts/"+url.PathEscape(receipt)+".json", url.Values{"token": {token}}, options...)
+	response, err := c.Get(ctx, "/1/receipts/"+url.PathEscape(receipt)+".json", url.Values{"token": {token}}, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -37,12 +37,12 @@ func (c *Client) ReceiptStatus(ctx context.Context, token, receipt string, optio
 }
 
 func (c *Client) CancelReceipt(ctx context.Context, token, receipt string, options ...RequestOption) error {
-	_, err := c.PostForm(ctx, "1/receipts/"+url.PathEscape(receipt)+"/cancel.json", url.Values{"token": {token}}, options...)
+	_, err := c.PostForm(ctx, "/1/receipts/"+url.PathEscape(receipt)+"/cancel.json", url.Values{"token": {token}}, options...)
 	return err
 }
 
 func (c *Client) CancelReceiptsByTag(ctx context.Context, token, tag string, options ...RequestOption) (int, error) {
-	response, err := c.PostForm(ctx, "1/receipts/cancel_by_tag/"+url.PathEscape(tag)+".json", url.Values{"token": {token}}, options...)
+	response, err := c.PostForm(ctx, "/1/receipts/cancel_by_tag/"+url.PathEscape(tag)+".json", url.Values{"token": {token}}, options...)
 	if err != nil {
 		return 0, err
 	}

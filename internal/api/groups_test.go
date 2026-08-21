@@ -74,7 +74,7 @@ func TestGroupClientMethods(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New(server.URL+"/1", "0.0.0-test", WithSleep(func(time.Duration) {}))
+	client := New(server.URL, "0.0.0-test", WithSleep(func(time.Duration) {}))
 	ctx := context.Background()
 
 	groupKey, err := client.CreateGroup(ctx, testGroupAppToken, "test group")
@@ -131,7 +131,7 @@ func TestCreateGroupReturnsAPIError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := New(server.URL+"/1", "0.0.0-test", WithSleep(func(time.Duration) {})).CreateGroup(context.Background(), testGroupAppToken, "")
+	_, err := New(server.URL, "0.0.0-test", WithSleep(func(time.Duration) {})).CreateGroup(context.Background(), testGroupAppToken, "")
 	if err == nil {
 		t.Fatal("CreateGroup() error = nil, want error")
 	}
@@ -141,6 +141,21 @@ func TestCreateGroupReturnsAPIError(t *testing.T) {
 	}
 	if got := apiError.Errors["name"]; len(got) != 1 || got[0] != "is required" {
 		t.Errorf("name errors = %#v", got)
+	}
+}
+
+func TestCreateGroupUsesVersionedPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if got := request.URL.Path; got != "/1/groups.json" {
+			t.Errorf("path = %q, want %q", got, "/1/groups.json")
+		}
+		_, _ = writer.Write([]byte(`{"status":1,"group":"test-group-key-000000000000000"}`))
+	}))
+	defer server.Close()
+
+	_, err := New(server.URL, testVersion, WithSleep(func(time.Duration) {})).CreateGroup(context.Background(), testGroupAppToken, "test group")
+	if err != nil {
+		t.Fatalf("CreateGroup() error = %v", err)
 	}
 }
 

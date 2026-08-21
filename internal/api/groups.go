@@ -31,7 +31,7 @@ type GroupDetail struct {
 // create group creates a group and returns its key.
 func (c *Client) CreateGroup(ctx context.Context, appToken, name string) (string, error) {
 	values := url.Values{"token": {appToken}, "name": {name}}
-	response, err := c.PostForm(ctx, "groups.json", values)
+	response, err := c.PostForm(ctx, "/1/groups.json", values)
 	if err != nil {
 		return "", err
 	}
@@ -47,7 +47,7 @@ func (c *Client) CreateGroup(ctx context.Context, appToken, name string) (string
 
 // list groups returns all groups available to an application.
 func (c *Client) ListGroups(ctx context.Context, appToken string) ([]Group, error) {
-	response, err := c.Get(ctx, "groups.json", url.Values{"token": {appToken}})
+	response, err := c.Get(ctx, "/1/groups.json", url.Values{"token": {appToken}})
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func (c *Client) ListGroups(ctx context.Context, appToken string) ([]Group, erro
 
 // get group returns the members and name for a group.
 func (c *Client) GetGroup(ctx context.Context, appToken, groupKey string) (GroupDetail, error) {
-	response, err := c.Get(ctx, "groups/"+groupKey+".json", url.Values{"token": {appToken}})
+	response, err := c.Get(ctx, "/1/groups/"+groupKey+".json", url.Values{"token": {appToken}})
 	if err != nil {
 		return GroupDetail{}, err
 	}
@@ -85,27 +85,27 @@ func (c *Client) AddGroupUser(ctx context.Context, appToken, groupKey, user, dev
 	if memo != "" {
 		values.Set("memo", memo)
 	}
-	return c.postGroup(ctx, "groups/"+groupKey+"/add_user.json", values)
+	return c.postGroup(ctx, "/1/groups/"+groupKey+"/add_user.json", values)
 }
 
 // remove group user removes a user's group membership.
 func (c *Client) RemoveGroupUser(ctx context.Context, appToken, groupKey, user, device string) error {
-	return c.postGroup(ctx, "groups/"+groupKey+"/remove_user.json", groupUserValues(appToken, user, device))
+	return c.postGroup(ctx, "/1/groups/"+groupKey+"/remove_user.json", groupUserValues(appToken, user, device))
 }
 
 // disable group user disables a user's group membership.
 func (c *Client) DisableGroupUser(ctx context.Context, appToken, groupKey, user, device string) error {
-	return c.postGroup(ctx, "groups/"+groupKey+"/disable_user.json", groupUserValues(appToken, user, device))
+	return c.postGroup(ctx, "/1/groups/"+groupKey+"/disable_user.json", groupUserValues(appToken, user, device))
 }
 
 // enable group user enables a user's group membership.
 func (c *Client) EnableGroupUser(ctx context.Context, appToken, groupKey, user, device string) error {
-	return c.postGroup(ctx, "groups/"+groupKey+"/enable_user.json", groupUserValues(appToken, user, device))
+	return c.postGroup(ctx, "/1/groups/"+groupKey+"/enable_user.json", groupUserValues(appToken, user, device))
 }
 
 // rename group changes a group's name.
 func (c *Client) RenameGroup(ctx context.Context, appToken, groupKey, name string) error {
-	return c.postGroup(ctx, "groups/"+groupKey+"/rename.json", url.Values{"token": {appToken}, "name": {name}})
+	return c.postGroup(ctx, "/1/groups/"+groupKey+"/rename.json", url.Values{"token": {appToken}, "name": {name}})
 }
 
 func (c *Client) postGroup(ctx context.Context, path string, values url.Values) error {

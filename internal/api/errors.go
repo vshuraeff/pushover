@@ -46,7 +46,14 @@ func (e *APIError) Error() string {
 	if e == nil {
 		return ""
 	}
+	message := e.message()
+	if e.Request != "" {
+		message += " (request " + e.Request + ")"
+	}
+	return message
+}
 
+func (e *APIError) message() string {
 	keys := make([]string, 0, len(e.Errors))
 	for key := range e.Errors {
 		keys = append(keys, key)
@@ -66,9 +73,6 @@ func (e *APIError) Error() string {
 	if len(messages) > 0 {
 		message += ": " + strings.Join(messages, "; ")
 	}
-	if e.Request != "" {
-		message += " (request " + e.Request + ")"
-	}
 	return message
 }
 
@@ -83,14 +87,17 @@ func (e *QuotaError) Error() string {
 		return ""
 	}
 	if e.APIError != nil {
-		message := e.APIError.Error()
+		message := e.APIError.message()
 		if e.Reset != "" {
-			message += " (message limit reached; resets at " + e.Reset + ")"
+			message += " (resets at " + e.Reset + ")"
+		}
+		if e.APIError.Request != "" {
+			message += " (request " + e.APIError.Request + ")"
 		}
 		return message
 	}
 	if e.Reset != "" {
-		return "pushover quota exceeded (reset " + e.Reset + ")"
+		return "pushover quota exceeded (resets at " + e.Reset + ")"
 	}
 	return "pushover quota exceeded"
 }
