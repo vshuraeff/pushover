@@ -12,22 +12,44 @@ import (
 	"testing"
 
 	"github.com/vshuraeff/pushover/internal/api"
+	pushovercrypto "github.com/vshuraeff/pushover/internal/crypto"
 )
 
+const testEncryptionKeyHex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+
 func TestSendCommandFullFlags(t *testing.T) {
+	encryptionKey, err := pushovercrypto.ParseKey(testEncryptionKeyHex)
+	if err != nil {
+		t.Fatalf("ParseKey() error = %v", err)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("ParseForm() error = %v", err)
 		}
 		for name, want := range map[string]string{
-			"user": "direct-user,group-key", "message": "message", "device": "phone", "title": "title",
-			"url": "https://example.test", "url_title": "example", "priority": "2", "retry": "30",
+			"user": "direct-user,group-key", "device": "phone", "priority": "2", "retry": "30",
 			"expire": "3600", "callback": "https://example.test/callback", "tags": "release",
 			"sound": "siren", "timestamp": "1700000000", "ttl": "120", "html": "1",
 			"monospace": "1", "encrypted": "1",
 		} {
 			if got := r.Form.Get(name); got != want {
 				t.Errorf("form %q = %q, want %q", name, got, want)
+			}
+		}
+		for name, want := range map[string]string{
+			"message": "message", "title": "title", "url": "https://example.test", "url_title": "example",
+		} {
+			got := r.Form.Get(name)
+			if got == want {
+				t.Errorf("form %q was sent as plaintext", name)
+			}
+			plaintext, err := pushovercrypto.DecryptField(got, encryptionKey)
+			if err != nil {
+				t.Errorf("decrypt form %q: %v", name, err)
+				continue
+			}
+			if plaintext != want {
+				t.Errorf("decrypted form %q = %q, want %q", name, plaintext, want)
 			}
 		}
 		if r.Form.Get("token") == "" {
@@ -54,6 +76,25 @@ func TestSendCommandFullFlags(t *testing.T) {
 	}
 	if result.Request != "request-id" || result.Receipt != "receipt-id" {
 		t.Errorf("send JSON result = %+v", result)
+	}
+}
+
+func TestSendCommandEncryptedRequiresKey(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	configureCLITestEnv(t, server.URL)
+	t.Setenv("PUSHOVER_ENCRYPTION_KEY", "")
+
+	_, err := executeCLI(t, nil, "send", "--encrypted", "message")
+	if err == nil || !strings.Contains(err.Error(), "PUSHOVER_ENCRYPTION_KEY") {
+		t.Errorf("povr send error = %v, want missing encryption key error", err)
+	}
+	if requests != 0 {
+		t.Errorf("requests = %d, want 0", requests)
 	}
 }
 
@@ -220,6 +261,7 @@ func configureCLITestEnv(t *testing.T, apiURL string) {
 	t.Setenv("PUSHOVER_API_URL", apiURL)
 	t.Setenv("PUSHOVER_APP_TOKEN", "testtoken1234567890123456789012")
 	t.Setenv("PUSHOVER_USER_KEY", "testuserkey12345678901234567890")
+	t.Setenv("PUSHOVER_ENCRYPTION_KEY", testEncryptionKeyHex)
 }
 
 func executeCLI(t *testing.T, input io.Reader, args ...string) (string, error) {

@@ -9,10 +9,11 @@ import (
 type Role string
 
 const (
-	RoleAppToken  Role = "app_token"
-	RoleUserKey   Role = "user_key"
-	RoleTeamToken Role = "team_token"
-	RoleSession   Role = "session"
+	RoleAppToken      Role = "app_token"
+	RoleUserKey       Role = "user_key"
+	RoleTeamToken     Role = "team_token"
+	RoleEncryptionKey Role = "encryption_key"
+	RoleSession       Role = "session"
 )
 
 type RoleRequirement struct {
@@ -21,10 +22,11 @@ type RoleRequirement struct {
 }
 
 type EnvFlags struct {
-	KeyEnv   string
-	TokenEnv string
-	UserEnv  string
-	TeamEnv  string
+	KeyEnv           string
+	TokenEnv         string
+	UserEnv          string
+	TeamEnv          string
+	EncryptionKeyEnv string
 }
 
 // specific role flags take precedence over --key-env for the primary role.
@@ -74,7 +76,7 @@ func Resolve(role, primary Role, flags EnvFlags) (string, error) {
 
 func isKnownRole(role Role) bool {
 	switch role {
-	case RoleAppToken, RoleUserKey, RoleTeamToken, RoleSession:
+	case RoleAppToken, RoleUserKey, RoleTeamToken, RoleEncryptionKey, RoleSession:
 		return true
 	default:
 		return false
@@ -90,6 +92,8 @@ func envFlagName(role, primary Role, flags EnvFlags) string {
 		specific = flags.UserEnv
 	case RoleTeamToken:
 		specific = flags.TeamEnv
+	case RoleEncryptionKey:
+		specific = flags.EncryptionKeyEnv
 	}
 	if specific != "" {
 		return specific
@@ -108,6 +112,8 @@ func defaultEnvName(role Role) string {
 		return "PUSHOVER_USER_KEY"
 	case RoleTeamToken:
 		return "PUSHOVER_TEAM_TOKEN"
+	case RoleEncryptionKey:
+		return "PUSHOVER_ENCRYPTION_KEY"
 	default:
 		return ""
 	}

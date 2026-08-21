@@ -26,11 +26,12 @@ var (
 )
 
 type TOMLConfig struct {
-	AppToken  string `toml:"app_token"`
-	UserKey   string `toml:"user_key"`
-	TeamToken string `toml:"team_token"`
-	APIURL    string `toml:"api_url"`
-	WSURL     string `toml:"ws_url"`
+	AppToken      string `toml:"app_token"`
+	UserKey       string `toml:"user_key"`
+	TeamToken     string `toml:"team_token"`
+	EncryptionKey string `toml:"encryption_key"`
+	APIURL        string `toml:"api_url"`
+	WSURL         string `toml:"ws_url"`
 }
 
 func LoadTOMLConfig() (*TOMLConfig, error) {
@@ -114,6 +115,8 @@ func (c *TOMLConfig) credential(role Role) string {
 		return c.UserKey
 	case RoleTeamToken:
 		return c.TeamToken
+	case RoleEncryptionKey:
+		return c.EncryptionKey
 	default:
 		return ""
 	}

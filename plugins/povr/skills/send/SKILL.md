@@ -17,8 +17,10 @@ The message is the positional argument, or `--message`, or stdin when the argume
 comma-separated list of user or group keys.
 
 Credentials are never flag values: the app token and user key come from the
-environment or the config file. If a command fails to resolve one, run `/povr:setup`
-rather than passing a secret on the command line.
+environment or the config file. `--encrypted` also requires a message encryption key
+from `--encryption-key-env`, `PUSHOVER_ENCRYPTION_KEY`, or the `encryption_key` config
+key. If a command fails to resolve one, run `/povr:setup` rather than passing a secret
+on the command line.
 
 Output is two lines, `request: <id>` and, for emergencies, `receipt: <id>`. Add
 `--json` for one machine-readable object: `{"status":1,"request":"...","receipt":"..."}`.
@@ -30,9 +32,12 @@ Output is two lines, `request: <id>` and, for emergencies, `receipt: <id>`. Add
 `--html`, `--monospace`, `--encrypted`, `--attachment`, `--attachment-base64`,
 `--attachment-type`, `--json`.
 
-Rejected before any request is made: message longer than 1024 runes, title over 250,
-`--url` over 512, `--url-title` over 100, `--priority` outside -2..2, an attachment
-over 5242880 bytes, and both attachment flags at once.
+For plaintext sends, rejected before any request is made: message longer than 1024
+runes, title over 250, `--url` over 512, `--url-title` over 100, `--priority` outside
+-2..2, an attachment over 5242880 bytes, and both attachment flags at once. Encrypted
+sends validate plaintext lengths first, but encryption expands field values and
+Pushover's public docs do not specify whether server limits apply to plaintext or
+ciphertext lengths.
 
 ## Priority
 

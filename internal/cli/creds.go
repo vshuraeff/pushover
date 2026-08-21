@@ -24,11 +24,16 @@ func EnvFlagsFromCommand(cmd *cobra.Command) (config.EnvFlags, error) {
 	if err != nil {
 		return config.EnvFlags{}, fmt.Errorf("read --team-env flag: %w", err)
 	}
+	encryptionKeyEnv, err := cmd.Flags().GetString("encryption-key-env")
+	if err != nil {
+		return config.EnvFlags{}, fmt.Errorf("read --encryption-key-env flag: %w", err)
+	}
 
 	return config.EnvFlags{
-		KeyEnv:   keyEnv,
-		TokenEnv: tokenEnv,
-		UserEnv:  userEnv,
-		TeamEnv:  teamEnv,
+		KeyEnv:           keyEnv,
+		TokenEnv:         tokenEnv,
+		UserEnv:          userEnv,
+		TeamEnv:          teamEnv,
+		EncryptionKeyEnv: encryptionKeyEnv,
 	}, nil
 }

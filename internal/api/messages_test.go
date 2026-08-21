@@ -9,9 +9,12 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	pushovercrypto "github.com/vshuraeff/pushover/internal/crypto"
 )
 
 func TestSendMessageFullParameters(t *testing.T) {
+	encryptionKey := bytes.Repeat([]byte{0x42}, 32)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method = %s, want POST", r.Method)
@@ -23,14 +26,30 @@ func TestSendMessageFullParameters(t *testing.T) {
 			t.Fatalf("ParseForm() error = %v", err)
 		}
 		for name, want := range map[string]string{
-			"token": "test-token", "user": "user-one,user-two", "message": "message text",
-			"device": "phone", "title": "title", "url": "https://example.test/link",
-			"url_title": "link title", "priority": "2", "retry": "30", "expire": "3600",
+			"token": "test-token", "user": "user-one,user-two", "device": "phone",
+			"priority": "2", "retry": "30", "expire": "3600",
 			"callback": "https://example.test/callback", "tags": "deploy,urgent", "sound": "siren",
 			"timestamp": "1700000000", "ttl": "120", "html": "1", "monospace": "1", "encrypted": "1",
 		} {
 			if got := r.Form.Get(name); got != want {
 				t.Errorf("form %q = %q, want %q", name, got, want)
+			}
+		}
+		for name, want := range map[string]string{
+			"message": "message text", "title": "title", "url": "https://example.test/link",
+			"url_title": "link title",
+		} {
+			got := r.Form.Get(name)
+			if got == want {
+				t.Errorf("form %q was sent as plaintext", name)
+			}
+			plaintext, err := pushovercrypto.DecryptField(got, encryptionKey)
+			if err != nil {
+				t.Errorf("decrypt form %q: %v", name, err)
+				continue
+			}
+			if plaintext != want {
+				t.Errorf("decrypted form %q = %q, want %q", name, plaintext, want)
 			}
 		}
 		_, _ = w.Write([]byte(`{"status":1,"request":"request-id","receipt":"receipt-id"}`))
@@ -43,7 +62,7 @@ func TestSendMessageFullParameters(t *testing.T) {
 		Device: "phone", Title: "title", URL: "https://example.test/link", URLTitle: "link title",
 		Priority: &priority, Retry: 30, Expire: 3600, Callback: "https://example.test/callback",
 		Tags: "deploy,urgent", Sound: "siren", Timestamp: 1_700_000_000, TTL: 120,
-		HTML: true, Monospace: true, Encrypted: true,
+		HTML: true, Monospace: true, Encrypted: true, EncryptionKey: encryptionKey,
 	})
 	if err != nil {
 		t.Fatalf("SendMessage() error = %v", err)
@@ -157,6 +176,12 @@ func TestSendMessageValidation(t *testing.T) {
 		{name: "long title", req: func() SendMessageRequest { req := valid(); req.Title = strings.Repeat("é", 251); return req }(), want: "title"},
 		{name: "long URL", req: func() SendMessageRequest { req := valid(); req.URL = strings.Repeat("é", 513); return req }(), want: "url"},
 		{name: "long URL title", req: func() SendMessageRequest { req := valid(); req.URLTitle = strings.Repeat("é", 101); return req }(), want: "url_title"},
+		{name: "encrypted with invalid key", req: func() SendMessageRequest {
+			req := valid()
+			req.Encrypted = true
+			req.EncryptionKey = []byte("short")
+			return req
+		}(), want: "encryption key must be 32 bytes"},
 		{name: "no users", req: func() SendMessageRequest { req := valid(); req.User = nil; return req }(), want: "user"},
 		{name: "too many users", req: func() SendMessageRequest { req := valid(); req.User = make([]string, 51); return req }(), want: "user"},
 		{name: "priority out of range", req: func() SendMessageRequest { req := valid(); req.Priority = &priorityTooHigh; return req }(), want: "priority"},

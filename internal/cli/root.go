@@ -21,6 +21,7 @@ func NewRootCommand() *cobra.Command {
 	flags.String("token-env", "", "environment variable name for the app token")
 	flags.String("user-env", "", "environment variable name for the user key")
 	flags.String("team-env", "", "environment variable name for the team token")
+	flags.String("encryption-key-env", "", "environment variable name for the message encryption key")
 
 	return cmd
 }

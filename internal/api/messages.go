@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	pushovercrypto "github.com/vshuraeff/pushover/internal/crypto"
 )
 
 const MaxAttachmentBytes = 5_242_880
@@ -35,6 +37,7 @@ type SendMessageRequest struct {
 	HTML             bool
 	Monospace        bool
 	Encrypted        bool
+	EncryptionKey    []byte
 	Attachment       *FilePart
 	AttachmentBase64 []byte
 	AttachmentType   string
@@ -49,6 +52,29 @@ type SendMessageResponse struct {
 func (c *Client) SendMessage(ctx context.Context, req SendMessageRequest, options ...RequestOption) (*SendMessageResponse, error) {
 	if err := validateSendMessage(req); err != nil {
 		return nil, err
+	}
+	if req.Encrypted {
+		if len(req.EncryptionKey) != 32 {
+			return nil, fmt.Errorf("encryption key must be 32 bytes (AES-256) when encrypted is set")
+		}
+		for _, field := range []struct {
+			name  string
+			value *string
+		}{
+			{name: "message", value: &req.Message},
+			{name: "title", value: &req.Title},
+			{name: "url", value: &req.URL},
+			{name: "url_title", value: &req.URLTitle},
+		} {
+			if *field.value == "" {
+				continue
+			}
+			encrypted, err := pushovercrypto.EncryptField(*field.value, req.EncryptionKey)
+			if err != nil {
+				return nil, fmt.Errorf("encrypt %s: %w", field.name, err)
+			}
+			*field.value = encrypted
+		}
 	}
 
 	fields := url.Values{
