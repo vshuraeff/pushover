@@ -221,7 +221,7 @@ func TestTeamListUsesCustomTeamTokenEnvironmentName(t *testing.T) {
 		"MY_TEAM_TOKEN":       fixtureTeamToken,
 		"PUSHOVER_TEAM_TOKEN": "wrong-default-team-token",
 	})
-	result := runProgram(t, env, "", binaryPath, "--team-env", "MY_TEAM_TOKEN", "team", "list")
+	result := runProgram(t, env, "", binaryPath, "--key-env", "MY_TEAM_TOKEN", "team", "list")
 	requireSuccess(t, result)
 	for _, want := range []string{"team: E2E Team", "member-one", "devices=1"} {
 		if !strings.Contains(result.stdout, want) {
