@@ -6,11 +6,24 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/BurntSushi/toml"
 )
 
 const tomlConfigFileName = "pushover.conf"
+
+var errMalformedTOMLConfig = errors.New("decode config file")
+
+type warningKey struct {
+	path string
+	kind string
+}
+
+var (
+	warningMu    sync.Mutex
+	seenWarnings = make(map[warningKey]struct{})
+)
 
 type TOMLConfig struct {
 	AppToken  string `toml:"app_token"`
@@ -45,22 +58,49 @@ func loadTOMLConfig(path string) (*TOMLConfig, error) {
 		return nil, fmt.Errorf("stat config file %q: %w", path, err)
 	}
 	if info.Mode().Perm()&0o077 != 0 {
-		fmt.Fprintf(os.Stderr, "warning: config file %q has permissions %04o; credentials may be exposed\n", path, info.Mode().Perm())
+		warnOnce(path, "permissions", "warning: config file %q has permissions %04o; credentials may be exposed\n", path, info.Mode().Perm())
 	}
 
 	var config TOMLConfig
 	metadata, err := toml.DecodeFile(path, &config)
 	if err != nil {
-		return nil, fmt.Errorf("decode config file %q", path)
+		return nil, fmt.Errorf("%w %q", errMalformedTOMLConfig, path)
 	}
 	if keys := metadata.Undecoded(); len(keys) > 0 {
 		names := make([]string, 0, len(keys))
 		for _, key := range keys {
 			names = append(names, key.String())
 		}
-		fmt.Fprintf(os.Stderr, "warning: unknown config keys in %q: %s\n", path, strings.Join(names, ", "))
+		warnOnce(path, "unknown-keys", "warning: unknown config keys in %q: %s\n", path, strings.Join(names, ", "))
 	}
 	return &config, nil
+}
+
+func warnOnce(path, kind, format string, args ...any) {
+	warningMu.Lock()
+	defer warningMu.Unlock()
+
+	key := warningKey{path: path, kind: kind}
+	if _, ok := seenWarnings[key]; ok {
+		return
+	}
+	seenWarnings[key] = struct{}{}
+	fmt.Fprintf(os.Stderr, format, args...)
+}
+
+func resetWarnings() {
+	warningMu.Lock()
+	defer warningMu.Unlock()
+
+	clear(seenWarnings)
+}
+
+func warnMalformedTOMLConfig() {
+	path, err := tomlConfigPath()
+	if err != nil {
+		return
+	}
+	warnOnce(path, "malformed", "warning: config file %q is malformed and was ignored\n", path)
 }
 
 func (c *TOMLConfig) credential(role Role) string {

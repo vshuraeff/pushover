@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 )
@@ -42,7 +43,7 @@ func APIURL() string {
 	if url := os.Getenv("PUSHOVER_API_URL"); url != "" {
 		return url
 	}
-	if tomlConfig, err := LoadTOMLConfig(); err == nil && tomlConfig.APIURL != "" {
+	if tomlConfig := endpointTOMLConfig(); tomlConfig != nil && tomlConfig.APIURL != "" {
 		return tomlConfig.APIURL
 	}
 	return DefaultAPIURL
@@ -52,8 +53,19 @@ func WSURL() string {
 	if url := os.Getenv("PUSHOVER_WS_URL"); url != "" {
 		return url
 	}
-	if tomlConfig, err := LoadTOMLConfig(); err == nil && tomlConfig.WSURL != "" {
+	if tomlConfig := endpointTOMLConfig(); tomlConfig != nil && tomlConfig.WSURL != "" {
 		return tomlConfig.WSURL
 	}
 	return DefaultWSURL
+}
+
+func endpointTOMLConfig() *TOMLConfig {
+	config, err := LoadTOMLConfig()
+	if errors.Is(err, errMalformedTOMLConfig) {
+		warnMalformedTOMLConfig()
+	}
+	if err != nil {
+		return nil
+	}
+	return config
 }
