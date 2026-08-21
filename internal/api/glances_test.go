@@ -86,3 +86,26 @@ func TestGlancesSendValidatesBeforeNetwork(t *testing.T) {
 		t.Fatalf("network calls = %d, want 0", got)
 	}
 }
+
+func TestGlancesSendCountsRunes(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls.Add(1)
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"status":1}`))
+	}))
+	defer server.Close()
+
+	service := NewGlancesService(New(server.URL, "test-version"))
+	accepted := strings.Repeat("Ж", 100)
+	if _, err := service.Send(context.Background(), GlanceRequest{Title: &accepted}); err != nil {
+		t.Fatalf("send 100-rune title: %v", err)
+	}
+	rejected := strings.Repeat("Ж", 101)
+	if _, err := service.Send(context.Background(), GlanceRequest{Title: &rejected}); err == nil {
+		t.Fatal("send succeeded with a 101-rune title")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("network calls = %d, want 1", got)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"unicode/utf8"
 )
 
 // glances service sends glance updates.
@@ -88,7 +89,7 @@ func (s *GlancesService) Send(ctx context.Context, request GlanceRequest) (*Glan
 }
 
 func validateGlanceString(name string, value *string) error {
-	if value != nil && len(*value) > 100 {
+	if value != nil && utf8.RuneCountInString(*value) > 100 {
 		return fmt.Errorf("%s must be at most 100 characters", name)
 	}
 	return nil
