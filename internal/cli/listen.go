@@ -33,7 +33,7 @@ func newClientListenCommand() *cobra.Command {
 			if emergencyRealertSeconds < 30 {
 				return fmt.Errorf("--emergency-realert must be at least 30 seconds")
 			}
-			store, err := config.NewFileSessionStore()
+			store, err := config.NewSessionStore()
 			if err != nil {
 				return fmt.Errorf("create session store: %w", err)
 			}

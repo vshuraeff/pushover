@@ -26,11 +26,12 @@ var (
 )
 
 type TOMLConfig struct {
-	AppToken  string `toml:"app_token"`
-	UserKey   string `toml:"user_key"`
-	TeamToken string `toml:"team_token"`
-	APIURL    string `toml:"api_url"`
-	WSURL     string `toml:"ws_url"`
+	AppToken     string `toml:"app_token"`
+	UserKey      string `toml:"user_key"`
+	TeamToken    string `toml:"team_token"`
+	APIURL       string `toml:"api_url"`
+	WSURL        string `toml:"ws_url"`
+	SessionStore string `toml:"session_store"`
 }
 
 func LoadTOMLConfig() (*TOMLConfig, error) {

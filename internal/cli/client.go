@@ -38,7 +38,7 @@ func newClientLoginCommand() *cobra.Command {
 		Short: "Log in to a Pushover Open Client account",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := config.NewFileSessionStore()
+			store, err := config.NewSessionStore()
 			if err != nil {
 				return fmt.Errorf("create session store: %w", err)
 			}
@@ -57,7 +57,7 @@ func newClientRegisterCommand() *cobra.Command {
 		Short: "Register an Open Client device",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := config.NewFileSessionStore()
+			store, err := config.NewSessionStore()
 			if err != nil {
 				return fmt.Errorf("create session store: %w", err)
 			}
@@ -89,7 +89,7 @@ func newClientAckCommand() *cobra.Command {
 		Short: "Acknowledge an Open Client receipt",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := config.NewFileSessionStore()
+			store, err := config.NewSessionStore()
 			if err != nil {
 				return fmt.Errorf("create session store: %w", err)
 			}
@@ -103,7 +103,7 @@ func newClientAckCommand() *cobra.Command {
 }
 
 func runClientFetch(ctx context.Context, cmd *cobra.Command, jsonOutput bool) error {
-	store, err := config.NewFileSessionStore()
+	store, err := config.NewSessionStore()
 	if err != nil {
 		return fmt.Errorf("create session store: %w", err)
 	}
