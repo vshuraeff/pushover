@@ -31,13 +31,6 @@ func init() {
 }
 
 func runGlance(cmd *cobra.Command) error {
-	user, err := cmd.Flags().GetString("user")
-	if err != nil {
-		return fmt.Errorf("read --user flag: %w", err)
-	}
-	if user == "" {
-		return fmt.Errorf("--user is required")
-	}
 	device, err := cmd.Flags().GetString("device")
 	if err != nil {
 		return fmt.Errorf("read --device flag: %w", err)
@@ -49,6 +42,19 @@ func runGlance(cmd *cobra.Command) error {
 	token, err := config.Resolve(config.RoleAppToken, config.RoleAppToken, envFlags)
 	if err != nil {
 		return fmt.Errorf("resolve app token: %w", err)
+	}
+	user, err := cmd.Flags().GetString("user")
+	if err != nil {
+		return fmt.Errorf("read --user flag: %w", err)
+	}
+	if !cmd.Flags().Changed("user") {
+		user, err = config.Resolve(config.RoleUserKey, config.RoleAppToken, envFlags)
+		if err != nil {
+			return err
+		}
+	}
+	if user == "" {
+		return fmt.Errorf("--user is required")
 	}
 
 	request := api.GlanceRequest{
