@@ -100,9 +100,9 @@ See `/povr:read` for reading what arrives.
 
 For the fullest-fidelity macOS notifications (custom icons, sounds, levels), install the
 helper bundle once. Without it, povr falls back to alerter, if installed, or osascript,
-with reduced fidelity. `povr helper install` is macOS-only and is being added; until it
-lands, build and install `Povr.app` from a repository checkout with
-`./scripts/build-helper.sh`.
+with reduced fidelity. `povr helper install` is macOS-only; it copies the staged bundle
+(from the Homebrew formula's libexec, or a path given via `--from`) and re-signs it
+ad hoc. From a repository checkout you can instead run `./scripts/build-helper.sh`.
 
 ## Failure modes
 
