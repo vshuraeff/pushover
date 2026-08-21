@@ -43,7 +43,9 @@ func TestTOMLConfigCredentialFallback(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Cleanup(resetWarnings)
 			configDir := t.TempDir()
+			t.Setenv("HOME", t.TempDir())
 			t.Setenv("PUSHOVER_CONFIG_DIR", configDir)
 			for _, name := range []string{
 				"PUSHOVER_APP_TOKEN",
@@ -117,7 +119,9 @@ func TestLoadTOMLConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Cleanup(resetWarnings)
 			configDir := t.TempDir()
+			t.Setenv("HOME", t.TempDir())
 			t.Setenv("PUSHOVER_CONFIG_DIR", configDir)
 			configPath := filepath.Join(configDir, tomlConfigFileName)
 			if tt.writeFile {
@@ -158,6 +162,60 @@ func TestLoadTOMLConfig(t *testing.T) {
 				t.Error("warning output does not identify the config file")
 			}
 		})
+	}
+}
+
+func TestLoadTOMLConfigWarningsDeduplicated(t *testing.T) {
+	t.Cleanup(resetWarnings)
+	configDir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PUSHOVER_CONFIG_DIR", configDir)
+	configPath := filepath.Join(configDir, tomlConfigFileName)
+	if err := os.WriteFile(configPath, []byte("app_token = \"test-file-app-token\"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Chmod(configPath, 0o644); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	output := captureStderr(t, func() {
+		for range 2 {
+			if _, err := LoadTOMLConfig(); err != nil {
+				t.Fatalf("LoadTOMLConfig() error = %v", err)
+			}
+		}
+	})
+	if count := strings.Count(output, "warning:"); count != 1 {
+		t.Errorf("warning count = %d, want 1", count)
+	}
+	if !strings.Contains(output, configPath) {
+		t.Error("warning output does not identify the config file")
+	}
+}
+
+func TestResolveMalformedTOMLConfig(t *testing.T) {
+	t.Cleanup(resetWarnings)
+	configDir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PUSHOVER_CONFIG_DIR", configDir)
+	for _, name := range []string{
+		"PUSHOVER_APP_TOKEN",
+		"PUSHOVER_USER_KEY",
+		"PUSHOVER_TEAM_TOKEN",
+		"PUSHOVER_KEY",
+	} {
+		t.Setenv(name, "")
+	}
+	if err := os.WriteFile(filepath.Join(configDir, tomlConfigFileName), []byte("app_token = \"ignored\"\n["), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := Resolve(RoleAppToken, RoleAppToken, EnvFlags{})
+	if err == nil {
+		t.Fatal("Resolve() error = nil, want malformed TOML error")
+	}
+	if !strings.Contains(err.Error(), "decode config file") {
+		t.Errorf("Resolve() error = %v, want decode config file error", err)
 	}
 }
 

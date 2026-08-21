@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -60,6 +61,7 @@ func TestStatePaths(t *testing.T) {
 
 func TestEndpoints(t *testing.T) {
 	configDir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PUSHOVER_CONFIG_DIR", configDir)
 	t.Setenv("PUSHOVER_API_URL", "")
 	t.Setenv("PUSHOVER_WS_URL", "")
@@ -89,5 +91,38 @@ func TestEndpoints(t *testing.T) {
 	}
 	if got := WSURL(); got != "wss://env.invalid/push" {
 		t.Errorf("WSURL() = %q, want environment override", got)
+	}
+}
+
+func TestEndpointsMalformedTOMLWarning(t *testing.T) {
+	t.Cleanup(resetWarnings)
+	configDir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PUSHOVER_CONFIG_DIR", configDir)
+	t.Setenv("PUSHOVER_API_URL", "")
+	t.Setenv("PUSHOVER_WS_URL", "")
+	configPath := filepath.Join(configDir, tomlConfigFileName)
+	malformedMarker := "do-not-print-this-value"
+	contents := []byte("api_url = \"" + malformedMarker + "\"\n[")
+	if err := os.WriteFile(configPath, contents, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	output := captureStderr(t, func() {
+		if got := APIURL(); got != DefaultAPIURL {
+			t.Errorf("APIURL() = %q, want %q", got, DefaultAPIURL)
+		}
+		if got := WSURL(); got != DefaultWSURL {
+			t.Errorf("WSURL() = %q, want %q", got, DefaultWSURL)
+		}
+	})
+	if count := strings.Count(output, "warning:"); count != 1 {
+		t.Errorf("warning count = %d, want 1", count)
+	}
+	if !strings.Contains(output, configPath) {
+		t.Error("warning output does not identify the config file")
+	}
+	if strings.Contains(output, malformedMarker) {
+		t.Error("warning output must not contain config contents")
 	}
 }
