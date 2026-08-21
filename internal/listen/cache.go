@@ -8,43 +8,69 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/vshuraeff/pushover/internal/api"
+	"github.com/vshuraeff/pushover/internal/notify"
 )
 
-type assetCache struct {
-	client   *api.Client
-	iconDir  string
-	soundDir string
-	logger   *slog.Logger
+type soundConverter func(context.Context, string, string) (string, error)
+
+type cachedSound struct {
+	path string
+	name string
 }
 
-func newAssetCache(client *api.Client, iconDir, soundDir string, logger *slog.Logger) *assetCache {
+type assetCache struct {
+	client        *api.Client
+	iconDir       string
+	soundDir      string
+	convertSounds bool
+	converter     soundConverter
+	logger        *slog.Logger
+}
+
+func newAssetCache(client *api.Client, iconDir, soundDir string, notifier notify.Notifier, logger *slog.Logger) *assetCache {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &assetCache{client: client, iconDir: iconDir, soundDir: soundDir, logger: logger}
+	return &assetCache{
+		client:        client,
+		iconDir:       iconDir,
+		soundDir:      soundDir,
+		convertSounds: isHelperNotifier(notifier),
+		converter:     convertCachedSound,
+		logger:        logger,
+	}
 }
 
 func (c *assetCache) Icon(ctx context.Context, key string) string {
 	return c.resolve(ctx, c.iconDir, key, ".png", "/icons/", "icon")
 }
 
-func (c *assetCache) Sound(ctx context.Context, key string) string {
-	mp3Path := c.resolve(ctx, c.soundDir, key, ".mp3", "/sounds/", "sound")
-	if mp3Path == "" {
-		return ""
+func (c *assetCache) Sound(ctx context.Context, key string) cachedSound {
+	if key == "" {
+		return cachedSound{}
 	}
-	converted, err := convertCachedSound(ctx, mp3Path, key)
+	mp3Path := c.resolve(ctx, c.soundDir, key, ".mp3", "/sounds/", "sound")
+	if !c.convertSounds {
+		return cachedSound{path: mp3Path, name: key}
+	}
+	if mp3Path == "" || c.converter == nil {
+		return cachedSound{path: mp3Path}
+	}
+	converted, err := c.converter(ctx, mp3Path, key)
 	if err != nil {
 		c.logger.Warn("convert cached sound", "sound", key, "error", err)
-		return mp3Path
+		return cachedSound{path: mp3Path}
 	}
-	return converted
+	extension := filepath.Ext(converted)
+	name := strings.TrimSuffix(filepath.Base(converted), extension)
+	return cachedSound{path: converted, name: name}
 }
 
 func (c *assetCache) resolve(ctx context.Context, dir, key, extension, pathPrefix, kind string) string {
-	if dir == "" || key == "" || c.client == nil {
+	if dir == "" || key == "" {
 		return ""
 	}
 	if filepath.Base(key) != key || key == "." {
@@ -61,6 +87,9 @@ func (c *assetCache) resolve(ctx context.Context, dir, key, extension, pathPrefi
 		return path
 	} else if !os.IsNotExist(err) {
 		c.logger.Warn("inspect cached asset", "kind", kind, "path", path, "error", err)
+		return ""
+	}
+	if c.client == nil {
 		return ""
 	}
 
@@ -81,6 +110,7 @@ func (c *assetCache) resolve(ctx context.Context, dir, key, extension, pathPrefi
 		c.logger.Warn("write cached asset", "kind", kind, "key", key, "error", err)
 		return ""
 	}
+	c.logger.Info("cache miss", "kind", kind, "key", key)
 	return path
 }
 

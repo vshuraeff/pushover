@@ -38,23 +38,28 @@ func TestEmergencySchedulerRealertsAndStopsOnDisappearance(t *testing.T) {
 		t.Fatalf("notification = %#v", first)
 	}
 
-	clock.nextRequest(t)
-	scheduler.Update(map[string]notify.Notification{
-		"fake-receipt-123": {ID: "10", Body: "latest state"},
-	})
-	clock.nextRequest(t)
-	clock.Advance(30 * time.Second)
-	second := waitForNotification(t, notifier.notifications)
-	if second.ThreadID != "fake-receipt-123" || second.Body != "latest state" {
-		t.Fatalf("notification = %#v", second)
-	}
-
 	scheduler.Update(map[string]notify.Notification{})
 	scheduler.mu.Lock()
 	tracked := len(scheduler.entries)
 	scheduler.mu.Unlock()
 	if tracked != 0 {
 		t.Fatalf("tracked emergencies = %d, want 0", tracked)
+	}
+}
+
+func TestEmergencySchedulerUsesLatestState(t *testing.T) {
+	clock := newFakeClock()
+	scheduler := NewEmergencyScheduler(&channelNotifier{}, 30*time.Second, clock, testLogger())
+	scheduler.Update(map[string]notify.Notification{
+		"fake-receipt-latest": {ID: "30", Body: "first state"},
+	})
+	scheduler.Update(map[string]notify.Notification{
+		"fake-receipt-latest": {ID: "30", Body: "latest state"},
+	})
+	clock.Advance(30 * time.Second)
+	due := scheduler.takeDue(clock.Now())
+	if len(due) != 1 || due[0].notification.Body != "latest state" || due[0].notification.ThreadID != "fake-receipt-latest" {
+		t.Fatalf("due notifications = %#v", due)
 	}
 }
 

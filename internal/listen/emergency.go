@@ -3,6 +3,7 @@ package listen
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -10,6 +11,11 @@ import (
 )
 
 const emergencyLifetime = 3 * time.Hour
+
+type emergencyState struct {
+	messageID    int64
+	notification notify.Notification
+}
 
 // clock and timer match the daemon's deterministic scheduling needs.
 type Clock interface {
@@ -24,6 +30,7 @@ type Timer interface {
 }
 
 type scheduledEmergency struct {
+	messageID    int64
 	notification notify.Notification
 	firstSeen    time.Time
 	nextAlert    time.Time
@@ -70,6 +77,15 @@ func NewEmergencyScheduler(notifier notify.Notifier, interval time.Duration, clo
 
 // update replaces the complete set of receipts that remain open in the latest fetch.
 func (s *EmergencyScheduler) Update(open map[string]notify.Notification) {
+	states := make(map[string]emergencyState, len(open))
+	for receipt, notification := range open {
+		messageID, _ := strconv.ParseInt(notification.ID, 10, 64)
+		states[receipt] = emergencyState{messageID: messageID, notification: notification}
+	}
+	s.update(states)
+}
+
+func (s *EmergencyScheduler) update(open map[string]emergencyState) {
 	now := s.clock.Now()
 	s.mu.Lock()
 	for receipt := range s.entries {
@@ -82,17 +98,20 @@ func (s *EmergencyScheduler) Update(open map[string]notify.Notification) {
 			delete(s.capped, receipt)
 		}
 	}
-	for receipt, notification := range open {
+	for receipt, emergency := range open {
 		if _, capped := s.capped[receipt]; capped {
 			continue
 		}
+		notification := emergency.notification
 		notification.ThreadID = receipt
 		if entry, ok := s.entries[receipt]; ok {
+			entry.messageID = emergency.messageID
 			entry.notification = notification
 			entry.generation++
 			continue
 		}
 		s.entries[receipt] = &scheduledEmergency{
+			messageID:    emergency.messageID,
 			notification: notification,
 			firstSeen:    now,
 			nextAlert:    now.Add(s.interval),
@@ -101,6 +120,21 @@ func (s *EmergencyScheduler) Update(open map[string]notify.Notification) {
 	}
 	s.mu.Unlock()
 	s.signalWake()
+}
+
+// minopenid returns the lowest server message id still held open for acknowledgement.
+func (s *EmergencyScheduler) MinOpenID() (int64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var minimum int64
+	found := false
+	for _, entry := range s.entries {
+		if !found || entry.messageID < minimum {
+			minimum = entry.messageID
+			found = true
+		}
+	}
+	return minimum, found
 }
 
 // run processes scheduler updates and timer expirations until cancellation.

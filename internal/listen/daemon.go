@@ -87,7 +87,7 @@ func Run(ctx context.Context, daemon *Daemon) error {
 		notifier:    daemon.Notifier,
 		logger:      logger,
 		clock:       clock,
-		cache:       newAssetCache(daemon.APIClient, iconDir, soundDir, logger),
+		cache:       newAssetCache(daemon.APIClient, iconDir, soundDir, daemon.Notifier, logger),
 		deadLetters: newDeadLetterWriter(deadLetterPath, clock, logger),
 		emergencies: emergencies,
 		secret:      state.Secret,
@@ -103,7 +103,7 @@ func Run(ctx context.Context, daemon *Daemon) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		return err
+		return errors.New(redactError(err, state.Secret, state.DeviceID))
 	}
 
 	engine := &openclient.Engine{

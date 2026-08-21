@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -142,7 +143,9 @@ func redactError(err error, values ...string) string {
 	message := err.Error()
 	for _, value := range values {
 		if value != "" {
-			message = strings.ReplaceAll(message, value, "<redacted>")
+			for _, variant := range []string{value, url.QueryEscape(value), url.PathEscape(value)} {
+				message = strings.ReplaceAll(message, variant, "<redacted>")
+			}
 		}
 	}
 	return message
@@ -167,14 +170,17 @@ func (s *syncer) runOnce(ctx context.Context) error {
 
 	initialLast := s.state.LastProcessedMessageID
 	notifications := make(map[int]notify.Notification)
-	openEmergencies := make(map[string]notify.Notification)
+	openEmergencies := make(map[string]emergencyState)
 	for index, message := range messages {
 		isOpenEmergency := message.Priority == 2 && message.Acked == 0 && message.Receipt != ""
 		if message.ID > initialLast || isOpenEmergency {
 			notification := s.notification(ctx, message)
 			notifications[index] = notification
 			if isOpenEmergency {
-				openEmergencies[message.Receipt] = notification
+				openEmergencies[message.Receipt] = emergencyState{
+					messageID:    message.ID,
+					notification: notification,
+				}
 			}
 		}
 		if message.Receipt != "" && message.Acked == 1 {
@@ -183,10 +189,13 @@ func (s *syncer) runOnce(ctx context.Context) error {
 	}
 	if s.emergencies != nil {
 		// fetch is treated as the server's complete current open-emergency view.
-		s.emergencies.Update(openEmergencies)
+		s.emergencies.update(openEmergencies)
 	}
 
 	runningLast := initialLast
+	processed := 0
+	notified := 0
+	deadLettered := 0
 	for index, message := range messages {
 		if message.ID <= runningLast {
 			continue
@@ -196,6 +205,7 @@ func (s *syncer) runOnce(ctx context.Context) error {
 		if !ok {
 			notification = s.notification(ctx, message)
 		}
+		processed++
 		if err := s.notifyWithRetry(ctx, notification); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -205,7 +215,11 @@ func (s *syncer) runOnce(ctx context.Context) error {
 				s.logger.Error("dead-letter writer unavailable", "message_id", message.ID, "reason", reason)
 			} else if writeErr := s.deadLetters.Write(message, reason); writeErr != nil {
 				s.logger.Error("write dead letter", "message_id", message.ID, "error", writeErr)
+			} else {
+				deadLettered++
 			}
+		} else {
+			notified++
 		}
 		runningLast = message.ID
 	}
@@ -217,19 +231,43 @@ func (s *syncer) runOnce(ctx context.Context) error {
 			return fmt.Errorf("save last processed message id: %w", err)
 		}
 		s.state = &nextState
-		if err := s.updateHighest(ctx, s.secret, s.deviceID, runningLast); err != nil {
-			s.logger.Error("update highest message id", "message_id", runningLast, "error", err)
+		serverHighest := s.serverHighest(runningLast)
+		if err := s.updateHighest(ctx, s.secret, s.deviceID, serverHighest); err != nil {
+			s.logger.Error("update highest message id", "message_id", serverHighest, "error", err)
 		}
-		return nil
-	}
-
-	// duplicate-only fetches reassert the durable cursor after a prior update failure.
-	if len(messages) > 0 && initialLast > 0 && messages[len(messages)-1].ID <= initialLast {
-		if err := s.updateHighest(ctx, s.secret, s.deviceID, initialLast); err != nil {
-			s.logger.Error("update highest message id", "message_id", initialLast, "error", err)
+	} else if len(messages) > 0 && initialLast > 0 && messages[len(messages)-1].ID <= initialLast {
+		// duplicate-only fetches reassert the durable cursor after a prior update failure.
+		serverHighest := s.serverHighest(initialLast)
+		if err := s.updateHighest(ctx, s.secret, s.deviceID, serverHighest); err != nil {
+			s.logger.Error("update highest message id", "message_id", serverHighest, "error", err)
 		}
 	}
+	batchHighest := int64(0)
+	if len(messages) > 0 {
+		batchHighest = messages[len(messages)-1].ID
+	}
+	s.logger.Info("sync complete",
+		"batch_size", len(messages),
+		"batch_highest", batchHighest,
+		"processed", processed,
+		"notified", notified,
+		"dead_lettered", deadLettered,
+	)
 	return nil
+}
+
+func (s *syncer) serverHighest(natural int64) int64 {
+	if s.emergencies == nil {
+		return natural
+	}
+	minimum, ok := s.emergencies.MinOpenID()
+	if !ok || minimum > natural {
+		return natural
+	}
+	if minimum <= 0 {
+		return 0
+	}
+	return minimum - 1
 }
 
 func (s *syncer) notification(ctx context.Context, message openclient.Message) notify.Notification {
@@ -238,21 +276,24 @@ func (s *syncer) notification(ctx context.Context, message openclient.Message) n
 		id = strconv.FormatInt(message.ID, 10)
 	}
 	notification := notify.Notification{
-		ID:        id,
-		Title:     message.Title,
-		Body:      message.Message,
-		AppName:   message.App,
-		SoundName: message.Sound,
-		Priority:  message.Priority,
-		URL:       message.URL,
-		URLTitle:  message.URLTitle,
+		ID:       id,
+		Title:    message.Title,
+		Body:     message.Message,
+		AppName:  message.App,
+		Priority: message.Priority,
+		URL:      message.URL,
+		URLTitle: message.URLTitle,
 	}
 	if message.Priority == 2 && message.Receipt != "" {
 		notification.ThreadID = message.Receipt
 	}
 	if s.cache != nil {
 		notification.IconPath = s.cache.Icon(ctx, message.Icon)
-		notification.SoundPath = s.cache.Sound(ctx, message.Sound)
+		sound := s.cache.Sound(ctx, message.Sound)
+		notification.SoundPath = sound.path
+		notification.SoundName = sound.name
+	} else {
+		notification.SoundName = message.Sound
 	}
 	return notification
 }

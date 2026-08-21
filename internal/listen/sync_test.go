@@ -1,11 +1,14 @@
 package listen
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -53,21 +56,19 @@ func TestSyncerSortsDeduplicatesAndPersistsBeforeUpdate(t *testing.T) {
 	journal := make([]string, 0, 2)
 	store := &memoryStore{state: &config.State{LastProcessedMessageID: 1}, onSave: func() { journal = append(journal, "save") }}
 	notifier := &recordingNotifier{}
-	clock := newFakeClock()
-	emergencies := NewEmergencyScheduler(notifier, time.Minute, clock, testLogger())
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
 	messages := []openclient.Message{
-		{ID: 3, IDStr: "3", Title: "emergency", Message: "third", App: "test app", Priority: 2, Receipt: "fake-receipt-3"},
+		{ID: 3, IDStr: "3", Title: "third", Message: "third", App: "test app"},
 		{ID: 1, IDStr: "1", Title: "duplicate", Message: "first"},
 		{ID: 2, Title: "normal", Message: "second", URL: "https://example.invalid", URLTitle: "details"},
 	}
 	syncer := newSyncer(syncerConfig{
-		ctx:         context.Background(),
-		store:       store,
-		state:       store.state,
-		notifier:    notifier,
-		logger:      testLogger(),
-		clock:       clock,
-		emergencies: emergencies,
+		ctx:      context.Background(),
+		store:    store,
+		state:    store.state,
+		notifier: notifier,
+		logger:   logger,
 		fetch: func(context.Context, *api.Client, string, string) ([]openclient.Message, error) {
 			return append([]openclient.Message(nil), messages...), nil
 		},
@@ -86,31 +87,87 @@ func TestSyncerSortsDeduplicatesAndPersistsBeforeUpdate(t *testing.T) {
 	if got := notifier.IDs(); !reflect.DeepEqual(got, []string{"2", "3"}) {
 		t.Fatalf("notification ids = %#v", got)
 	}
-	if got := notifier.Last(); got.ThreadID != "fake-receipt-3" || got.Body != "third" {
-		t.Fatalf("emergency notification = %#v", got)
-	}
 	if !reflect.DeepEqual(journal, []string{"save", "update"}) {
 		t.Fatalf("journal = %#v", journal)
 	}
 	if store.state.LastProcessedMessageID != 3 {
 		t.Fatalf("saved cursor = %d, want 3", store.state.LastProcessedMessageID)
 	}
-	emergencies.mu.Lock()
-	_, tracked := emergencies.entries["fake-receipt-3"]
-	emergencies.mu.Unlock()
-	if !tracked {
-		t.Fatal("emergency receipt was not tracked")
+	if text := logs.String(); !strings.Contains(text, "sync complete") || !strings.Contains(text, "batch_size=3") || !strings.Contains(text, "notified=2") {
+		t.Fatalf("sync log = %q", text)
+	}
+}
+
+func TestSyncerCapsServerHighestUntilEmergencyAcknowledged(t *testing.T) {
+	events := make([]string, 0, 3)
+	updates := make([]int64, 0, 2)
+	store := &memoryStore{state: &config.State{}, onSave: func() { events = append(events, "save") }}
+	notifier := &recordingNotifier{}
+	emergencies := NewEmergencyScheduler(notifier, time.Minute, newFakeClock(), testLogger())
+	messages := []openclient.Message{
+		{ID: 8, IDStr: "8", Title: "later normal"},
+		{ID: 5, IDStr: "5", Title: "open emergency", Priority: 2, Receipt: "fake-receipt-5"},
+	}
+	syncer := newSyncer(syncerConfig{
+		ctx:         context.Background(),
+		store:       store,
+		state:       store.state,
+		notifier:    notifier,
+		logger:      testLogger(),
+		emergencies: emergencies,
+		fetch: func(context.Context, *api.Client, string, string) ([]openclient.Message, error) {
+			return append([]openclient.Message(nil), messages...), nil
+		},
+		updateHighest: func(_ context.Context, _, _ string, id int64) error {
+			events = append(events, "update")
+			updates = append(updates, id)
+			return nil
+		},
+	})
+
+	if err := syncer.runOnce(context.Background()); err != nil {
+		t.Fatalf("runOnce() error = %v", err)
+	}
+	if store.state.LastProcessedMessageID != 8 {
+		t.Fatalf("local cursor = %d, want 8", store.state.LastProcessedMessageID)
+	}
+	if !reflect.DeepEqual(events, []string{"save", "update"}) || !reflect.DeepEqual(updates, []int64{4}) {
+		t.Fatalf("events = %#v, updates = %#v", events, updates)
+	}
+	if minimum, ok := emergencies.MinOpenID(); !ok || minimum != 5 {
+		t.Fatalf("minimum open emergency = %d, %t", minimum, ok)
 	}
 
-	messages = []openclient.Message{{ID: 3, Priority: 2, Receipt: "fake-receipt-3", Acked: 1}}
+	messages = []openclient.Message{{ID: 5, Priority: 2, Receipt: "fake-receipt-5", Acked: 1}}
 	if err := syncer.runOnce(context.Background()); err != nil {
 		t.Fatalf("second runOnce() error = %v", err)
 	}
-	emergencies.mu.Lock()
-	trackedCount := len(emergencies.entries)
-	emergencies.mu.Unlock()
-	if trackedCount != 0 {
-		t.Fatalf("tracked emergencies after acknowledgement = %d, want 0", trackedCount)
+	if !reflect.DeepEqual(updates, []int64{4, 8}) {
+		t.Fatalf("updates after acknowledgement = %#v", updates)
+	}
+	if _, ok := emergencies.MinOpenID(); ok {
+		t.Fatal("acknowledged emergency remained open")
+	}
+	if got := notifier.IDs(); !reflect.DeepEqual(got, []string{"5", "8"}) {
+		t.Fatalf("notification ids = %#v", got)
+	}
+}
+
+func TestSyncerUsesConvertedSoundBaseName(t *testing.T) {
+	soundDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(soundDir, "bike.mp3"), []byte("fake-mp3-data"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	cache := newAssetCache(nil, t.TempDir(), soundDir, &channelNotifier{}, testLogger())
+	cache.convertSounds = true
+	cache.converter = func(context.Context, string, string) (string, error) {
+		return filepath.Join(soundDir, "povr-bike.caf"), nil
+	}
+	syncer := newSyncer(syncerConfig{cache: cache, notifier: &recordingNotifier{}})
+
+	notification := syncer.notification(context.Background(), openclient.Message{ID: 12, Sound: "bike"})
+	if notification.SoundName != "povr-bike" || notification.SoundPath != filepath.Join(soundDir, "povr-bike.caf") {
+		t.Fatalf("notification sound = name %q path %q", notification.SoundName, notification.SoundPath)
 	}
 }
 

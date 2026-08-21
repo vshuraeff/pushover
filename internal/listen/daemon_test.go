@@ -71,6 +71,42 @@ func TestRunPerformsInitialSyncAndTreatsCancellationAsClean(t *testing.T) {
 	}
 }
 
+func TestRunRedactsSecretFromInitialSyncError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		hijacker, ok := writer.(http.Hijacker)
+		if !ok {
+			t.Error("response writer does not support hijacking")
+			return
+		}
+		connection, _, err := hijacker.Hijack()
+		if err != nil {
+			t.Errorf("Hijack() error = %v", err)
+			return
+		}
+		_ = connection.Close()
+	}))
+	defer server.Close()
+	const secret = "fake-secret-must-not-leak"
+	tempDir := t.TempDir()
+	err := Run(context.Background(), &Daemon{
+		Store:            &memoryStore{state: &config.State{DeviceID: "fake-device-redacted", Secret: secret}},
+		APIClient:        api.New(server.URL, "0.0.0-test", api.WithSleep(func(time.Duration) {})),
+		Notifier:         &channelNotifier{},
+		Logger:           testLogger(),
+		WSURL:            "ws://127.0.0.1.invalid",
+		EmergencyRealert: time.Minute,
+		IconCacheDir:     filepath.Join(tempDir, "icons"),
+		SoundCacheDir:    filepath.Join(tempDir, "sounds"),
+		DeadLetterPath:   filepath.Join(tempDir, "deadletter.jsonl"),
+	})
+	if err == nil {
+		t.Fatal("Run() error = nil")
+	}
+	if strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), "<redacted>") {
+		t.Fatalf("Run() error was not safely redacted: %v", err)
+	}
+}
+
 type cancelNotifier struct {
 	cancel context.CancelFunc
 	calls  int

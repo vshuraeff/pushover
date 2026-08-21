@@ -1,11 +1,14 @@
 package listen
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -34,7 +37,9 @@ func TestAssetCacheDownloadsAtomicallyAndReusesFiles(t *testing.T) {
 	client := api.New(server.URL, "0.0.0-test", api.WithSleep(func(time.Duration) {}))
 	iconDir := filepath.Join(t.TempDir(), "icons")
 	soundDir := filepath.Join(t.TempDir(), "sounds")
-	cache := newAssetCache(client, iconDir, soundDir, testLogger())
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	cache := newAssetCache(client, iconDir, soundDir, &channelNotifier{}, logger)
 
 	iconPath := cache.Icon(context.Background(), "chat")
 	if iconPath != filepath.Join(iconDir, "chat.png") {
@@ -67,6 +72,9 @@ func TestAssetCacheDownloadsAtomicallyAndReusesFiles(t *testing.T) {
 	if hits["/icons/chat.png"] != 1 || hits["/sounds/bike.mp3"] != 1 {
 		t.Fatalf("request hits = %#v", hits)
 	}
+	if got := strings.Count(logs.String(), "cache miss"); got != 2 {
+		t.Fatalf("cache miss log lines = %d, want 2; logs = %q", got, logs.String())
+	}
 }
 
 func TestAssetCacheFailureIsBestEffort(t *testing.T) {
@@ -75,12 +83,43 @@ func TestAssetCacheFailureIsBestEffort(t *testing.T) {
 	}))
 	defer server.Close()
 	client := api.New(server.URL, "0.0.0-test", api.WithSleep(func(time.Duration) {}))
-	cache := newAssetCache(client, t.TempDir(), t.TempDir(), testLogger())
+	cache := newAssetCache(client, t.TempDir(), t.TempDir(), &channelNotifier{}, testLogger())
 
 	if path := cache.Icon(context.Background(), "missing"); path != "" {
 		t.Fatalf("missing icon path = %q, want empty", path)
 	}
 	if path := cache.Icon(context.Background(), "../unsafe"); path != "" {
 		t.Fatalf("unsafe icon path = %q, want empty", path)
+	}
+}
+
+func TestAssetCacheConvertsSoundsOnlyForHelperSignal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/sounds/bike.mp3" {
+			t.Errorf("path = %q", request.URL.Path)
+		}
+		_, _ = writer.Write([]byte("fake-mp3-data"))
+	}))
+	defer server.Close()
+	client := api.New(server.URL, "0.0.0-test", api.WithSleep(func(time.Duration) {}))
+	var conversions int
+	converter := func(_ context.Context, mp3Path, key string) (string, error) {
+		conversions++
+		return filepath.Join(filepath.Dir(mp3Path), "povr-"+key+".caf"), nil
+	}
+
+	rawCache := newAssetCache(client, t.TempDir(), t.TempDir(), &channelNotifier{}, testLogger())
+	rawCache.converter = converter
+	raw := rawCache.Sound(context.Background(), "bike")
+	if conversions != 0 || raw.name != "bike" || filepath.Ext(raw.path) != ".mp3" {
+		t.Fatalf("raw sound = %#v, conversions = %d", raw, conversions)
+	}
+
+	helperCache := newAssetCache(client, t.TempDir(), t.TempDir(), &channelNotifier{}, testLogger())
+	helperCache.convertSounds = true
+	helperCache.converter = converter
+	converted := helperCache.Sound(context.Background(), "bike")
+	if conversions != 1 || converted.name != "povr-bike" || filepath.Ext(converted.path) != ".caf" {
+		t.Fatalf("converted sound = %#v, conversions = %d", converted, conversions)
 	}
 }
