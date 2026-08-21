@@ -57,8 +57,8 @@ Credential-role values are never passed as command-line values: the `--*-env` fl
 below name an environment variable, never its contents. Each command resolves the roles
 it needs — `app_token`, `user_key`, `team_token` — from the environment first, then from
 the config file. The one secret that does take a literal flag value is
-`povr team add-user --password`; omit it and the server generates a password and emails
-it to the invited user.
+`povr team add-user --password`; omit it and no password is sent, which also keeps it
+out of your shell history and the process list.
 
 Resolution order per role:
 
@@ -313,8 +313,8 @@ make test    # go test ./...
 make e2e     # go test -tags e2e ./...
 ```
 
-The end-to-end suite runs behind the `e2e` build tag against the mock server;
-`go test -tags e2e ./e2e/...` runs it on its own.
+The end-to-end suite runs behind the `e2e` build tag against the mock server, so a
+plain `make test` skips it.
 
 ## Trademarks
 
