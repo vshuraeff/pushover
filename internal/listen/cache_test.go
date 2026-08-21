@@ -119,7 +119,7 @@ func TestAssetCacheConvertsSoundsOnlyForHelperSignal(t *testing.T) {
 	helperCache.convertSounds = true
 	helperCache.converter = converter
 	converted := helperCache.Sound(context.Background(), "bike")
-	if conversions != 1 || converted.name != "povr-bike" || filepath.Ext(converted.path) != ".caf" {
+	if conversions != 1 || converted.name != "povr-bike.caf" || filepath.Ext(converted.path) != ".caf" {
 		t.Fatalf("converted sound = %#v, conversions = %d", converted, conversions)
 	}
 }

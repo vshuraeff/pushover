@@ -31,7 +31,7 @@ func TestHelperNotifierDetection(t *testing.T) {
 		return filepath.Join(soundDir, "povr-bike.caf"), nil
 	}
 	got := cache.Sound(context.Background(), "bike")
-	if converted != 1 || got.name != "povr-bike" {
+	if converted != 1 || got.name != "povr-bike.caf" {
 		t.Fatalf("converted calls = %d, sound = %#v", converted, got)
 	}
 }

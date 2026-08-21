@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/vshuraeff/pushover/internal/api"
 	"github.com/vshuraeff/pushover/internal/notify"
@@ -64,8 +63,7 @@ func (c *assetCache) Sound(ctx context.Context, key string) cachedSound {
 		c.logger.Warn("convert cached sound", "sound", key, "error", err)
 		return cachedSound{path: mp3Path}
 	}
-	extension := filepath.Ext(converted)
-	name := strings.TrimSuffix(filepath.Base(converted), extension)
+	name := filepath.Base(converted)
 	return cachedSound{path: converted, name: name}
 }
 

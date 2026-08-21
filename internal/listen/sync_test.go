@@ -166,7 +166,7 @@ func TestSyncerUsesConvertedSoundBaseName(t *testing.T) {
 	syncer := newSyncer(syncerConfig{cache: cache, notifier: &recordingNotifier{}})
 
 	notification := syncer.notification(context.Background(), openclient.Message{ID: 12, Sound: "bike"})
-	if notification.SoundName != "povr-bike" || notification.SoundPath != filepath.Join(soundDir, "povr-bike.caf") {
+	if notification.SoundName != "povr-bike.caf" || notification.SoundPath != filepath.Join(soundDir, "povr-bike.caf") {
 		t.Fatalf("notification sound = name %q path %q", notification.SoundName, notification.SoundPath)
 	}
 }

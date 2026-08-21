@@ -233,13 +233,13 @@ func (s *syncer) runOnce(ctx context.Context) error {
 		s.state = &nextState
 		serverHighest := s.serverHighest(runningLast)
 		if err := s.updateHighest(ctx, s.secret, s.deviceID, serverHighest); err != nil {
-			s.logger.Error("update highest message id", "message_id", serverHighest, "error", err)
+			s.logger.Error("update highest message id", "message_id", serverHighest, "error", redactError(err))
 		}
 	} else if len(messages) > 0 && initialLast > 0 && messages[len(messages)-1].ID <= initialLast {
 		// duplicate-only fetches reassert the durable cursor after a prior update failure.
 		serverHighest := s.serverHighest(initialLast)
 		if err := s.updateHighest(ctx, s.secret, s.deviceID, serverHighest); err != nil {
-			s.logger.Error("update highest message id", "message_id", serverHighest, "error", err)
+			s.logger.Error("update highest message id", "message_id", serverHighest, "error", redactError(err))
 		}
 	}
 	batchHighest := int64(0)
