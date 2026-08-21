@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -287,6 +288,9 @@ func readState(t *testing.T, configDir string) config.State {
 func runViaPTY(t *testing.T, env []string, args, stdinLines []string) commandResult {
 	t.Helper()
 	const scriptPath = "/usr/bin/script"
+	if runtime.GOOS != "darwin" {
+		t.Skip("BSD-style /usr/bin/script PTY invocation is only supported on macOS (darwin)")
+	}
 	if info, err := os.Stat(scriptPath); err != nil || info.IsDir() {
 		t.Skip("/usr/bin/script is required for interactive login e2e tests")
 	}
