@@ -157,22 +157,24 @@ func TestValidateValidAndInvalidUserDeviceCombinations(t *testing.T) {
 }
 
 func TestValidatePrintsArrayAndObjectErrorShapes(t *testing.T) {
-	outputs := make(map[mockpushover.ErrorShape]string)
-	for _, shape := range []mockpushover.ErrorShape{mockpushover.ErrorShapeArray, mockpushover.ErrorShapeObject} {
-		t.Run(string(shape), func(t *testing.T) {
+	tests := []struct {
+		shape mockpushover.ErrorShape
+		want  string
+	}{
+		{shape: mockpushover.ErrorShapeArray, want: "pushover api error: user identifier is invalid"},
+		{shape: mockpushover.ErrorShapeObject, want: "pushover api error: user: identifier is invalid"},
+	}
+	for _, test := range tests {
+		t.Run(string(test.shape), func(t *testing.T) {
 			seed := defaultSeed()
-			seed.ErrorShape = shape
+			seed.ErrorShape = test.shape
 			h := newHarness(t, seed)
 			result := h.run(t, "validate", "--user", fixtureInvalidKey)
 			requireSuccess(t, result)
-			if !strings.Contains(result.stdout, "invalid: pushover api error") || !strings.Contains(result.stdout, "invalid") {
-				t.Fatalf("validation error shape was not readable: %s", result.stdout)
+			if !strings.Contains(result.stdout, test.want) {
+				t.Fatalf("validation output = %q, want it to contain %q", result.stdout, test.want)
 			}
-			outputs[shape] = result.stdout
 		})
-	}
-	if outputs[mockpushover.ErrorShapeArray] == outputs[mockpushover.ErrorShapeObject] {
-		t.Fatal("array and object error shapes produced indistinguishable output")
 	}
 }
 
