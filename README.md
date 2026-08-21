@@ -53,9 +53,10 @@ a small `Povr.app` bundle. Build and install it once:
 The script builds `cmd/povr-helper`, assembles `Povr.app`, signs it **ad hoc**
 (`codesign -s -`) and installs it to `~/Library/Application Support/povr/Povr.app`.
 The first notification triggers the usual one-time macOS permission prompt; grant it,
-otherwise nothing is displayed. Ad-hoc signing means the time-sensitive entitlement in
-`scripts/helper-entitlements.plist` is requested but not necessarily honoured — see
-[Known limits](#known-limits).
+otherwise nothing is displayed. By default the bundle is signed without entitlements —
+a restricted entitlement under ad-hoc signing gets the helper killed by AMFI at launch.
+To opt in (with a provisioning profile), set `POVR_HELPER_ENTITLEMENTS` to a plist
+path — see [Known limits](#known-limits).
 
 Backend selection on macOS, in order: the installed helper bundle, then `alerter` if
 it is on `PATH`, then AppleScript. Override with `PUSHOVER_NOTIFY_BACKEND`:
@@ -286,8 +287,9 @@ case three hours after the daemon first saw it.
 - Critical alerts (the level that pierces Focus and silent mode) require an entitlement
   granted by Apple to a registered developer account. `povr` cannot request it, so that
   level is not available.
-- `timeSensitive` delivery needs the time-sensitive entitlement. Under ad-hoc signing
-  macOS may downgrade it to `active`; the helper reports the fallback.
+- `timeSensitive` delivery needs the time-sensitive entitlement, which the default
+  ad-hoc build does not request (a restricted entitlement under ad-hoc signing gets
+  the helper killed by AMFI at launch). The helper falls back to `active` and says so.
 - Linux notifications are not implemented. `povr client listen` fails at startup with
   `backend not implemented on this platform`. Sending is unaffected.
 
