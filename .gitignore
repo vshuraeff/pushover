@@ -3,3 +3,6 @@ povr-mock
 povr-helper
 dist/
 *.test
+.DS_Store
+.claude/
+.serena/
