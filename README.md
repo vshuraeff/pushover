@@ -17,8 +17,9 @@ Two halves:
 ## Requirements
 
 - Go 1.26 or newer to build.
-- macOS for receiving notifications. Sending works on any platform Go supports;
-  `povr client listen` refuses to start where no notification backend exists (see
+- macOS or Linux; the session store uses `flock`, so Windows is not supported.
+  Notifications are macOS-only — on Linux the notification backend is a stub and
+  `povr client listen` refuses to start, while sending is unaffected (see
   [Known limits](#known-limits)).
 
 ## Install
@@ -52,10 +53,12 @@ it is on `PATH`, then AppleScript. Override with `PUSHOVER_NOTIFY_BACKEND`:
 
 ## Credentials
 
-Secrets are never passed as command-line values: the `--*-env` flags below name an
-environment variable, never its contents. Each command resolves the roles it needs —
-`app_token`, `user_key`, `team_token` — from the environment first, then from the
-config file.
+Credential-role values are never passed as command-line values: the `--*-env` flags
+below name an environment variable, never its contents. Each command resolves the roles
+it needs — `app_token`, `user_key`, `team_token` — from the environment first, then from
+the config file. The one secret that does take a literal flag value is
+`povr team add-user --password`; omit it and the server generates a password and emails
+it to the invited user.
 
 Resolution order per role:
 
@@ -103,7 +106,8 @@ The file matters most for daemon or launchd runs, where no environment is inheri
 ### Session state
 
 `povr client login` and `povr client register` write
-`~/.config/pushover/state.json` (mode `0600`, directory `0700`) holding the device id,
+`~/.config/pushover/state.json` (mode `0600`; the directory gets mode `0700` when
+`povr` creates it, a pre-existing one keeps its own permissions) holding the device id,
 device name, session secret and last processed message id. **The account password is
 never stored** — only the secret the server returns. Set `PUSHOVER_CONFIG_DIR` to move
 both the config file and the state file elsewhere.
@@ -309,8 +313,8 @@ make test    # go test ./...
 make e2e     # go test -tags e2e ./...
 ```
 
-The end-to-end suite is not in the tree yet; once it lands it runs behind the `e2e`
-build tag against the mock server.
+The end-to-end suite runs behind the `e2e` build tag against the mock server;
+`go test -tags e2e ./e2e/...` runs it on its own.
 
 ## Trademarks
 
