@@ -2,8 +2,8 @@
 
 `povr` is an unofficial command-line client for the Pushover service, written in Go.
 It is an independent Open Client implementation and is **not affiliated with, endorsed
-by, or supported by Superblock, LLC**, the makers of Pushover. It ships no Pushover
-branding or artwork. Report problems with `povr` here, not to Pushover support.
+by, or supported by Pushover or its makers**. It ships no Pushover branding or
+artwork. Report problems with `povr` here, not to Pushover support.
 
 Two halves:
 
@@ -314,5 +314,5 @@ build tag against the mock server.
 
 ## Trademarks
 
-Pushover is a trademark of Superblock, LLC. This project is an independent Open Client
-and uses the name only to identify the service it talks to.
+Pushover is a trademark of its owner. This project is an independent Open Client and
+uses the name only to identify the service it talks to.
