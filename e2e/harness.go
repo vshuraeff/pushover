@@ -24,20 +24,21 @@ import (
 )
 
 const (
-	fixtureAppToken   = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	fixtureUserKey    = "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuu"
-	fixtureUserKey2   = "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
-	fixtureInvalidKey = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-	fixtureTeamToken  = "fixture-team-token"
-	fixtureDeviceID   = "fixture-device-one"
-	fixtureDeviceID2  = "fixture-device-two"
-	fixtureSecret     = "fixture-session-secret-one"
-	fixtureSecret2    = "fixture-session-secret-two"
-	fixtureEmail      = "one@example.test"
-	fixturePassword   = "fixture-password-one"
-	fixtureTwoFAEmail = "two@example.test"
-	fixtureTwoFAPass  = "fixture-password-two"
-	fixtureTwoFACode  = "123456"
+	fixtureAppToken      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	fixtureUserKey       = "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuu"
+	fixtureUserKey2      = "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+	fixtureInvalidKey    = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+	fixtureTeamToken     = "fixture-team-token"
+	fixtureEncryptionKey = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+	fixtureDeviceID      = "fixture-device-one"
+	fixtureDeviceID2     = "fixture-device-two"
+	fixtureSecret        = "fixture-session-secret-one"
+	fixtureSecret2       = "fixture-session-secret-two"
+	fixtureEmail         = "one@example.test"
+	fixturePassword      = "fixture-password-one"
+	fixtureTwoFAEmail    = "two@example.test"
+	fixtureTwoFAPass     = "fixture-password-two"
+	fixtureTwoFACode     = "123456"
 )
 
 type harness struct {
@@ -136,6 +137,7 @@ func newHarness(t *testing.T, seed mockpushover.SeedState) *harness {
 		"PUSHOVER_APP_TOKEN":      fixtureAppToken,
 		"PUSHOVER_USER_KEY":       fixtureUserKey,
 		"PUSHOVER_TEAM_TOKEN":     fixtureTeamToken,
+		"PUSHOVER_ENCRYPTION_KEY": fixtureEncryptionKey,
 		"PUSHOVER_KEY":            "",
 	})
 	return &harness{

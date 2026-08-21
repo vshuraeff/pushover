@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vshuraeff/pushover/internal/api"
 	"github.com/vshuraeff/pushover/internal/config"
+	pushovercrypto "github.com/vshuraeff/pushover/internal/crypto"
 )
 
 func init() {
@@ -77,12 +78,23 @@ func newSendCommand() *cobra.Command {
 			} else {
 				recipients = recipientKeys(recipientFlag)
 			}
+			var encryptionKey []byte
+			if encrypted {
+				encodedKey, err := config.Resolve(config.RoleEncryptionKey, config.RoleAppToken, envFlags)
+				if err != nil {
+					return err
+				}
+				encryptionKey, err = pushovercrypto.ParseKey(encodedKey)
+				if err != nil {
+					return err
+				}
+			}
 
 			req := api.SendMessageRequest{
 				Token: token, User: recipients, Message: message, Device: device,
 				Title: title, URL: messageURL, URLTitle: urlTitle, Retry: retry, Expire: expire,
 				Callback: callback, Tags: tags, Sound: sound, Timestamp: timestamp, TTL: ttl,
-				HTML: html, Monospace: monospace, Encrypted: encrypted,
+				HTML: html, Monospace: monospace, Encrypted: encrypted, EncryptionKey: encryptionKey,
 			}
 			if cmd.Flags().Changed("priority") {
 				req.Priority = &priority
@@ -150,7 +162,7 @@ func newSendCommand() *cobra.Command {
 	flags.IntVar(&ttl, "ttl", 0, "message time to live in seconds")
 	flags.BoolVar(&html, "html", false, "enable HTML formatting")
 	flags.BoolVar(&monospace, "monospace", false, "enable monospace formatting")
-	flags.BoolVar(&encrypted, "encrypted", false, "mark message as encrypted")
+	flags.BoolVar(&encrypted, "encrypted", false, "encrypt message fields")
 	flags.StringVar(&attachmentPath, "attachment", "", "attachment file path")
 	flags.StringVar(&attachmentBase64Path, "attachment-base64", "", "base64 attachment file path")
 	flags.StringVar(&attachmentType, "attachment-type", "", "base64 attachment MIME type")

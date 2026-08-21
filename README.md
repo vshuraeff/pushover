@@ -66,8 +66,8 @@ it is on `PATH`, then AppleScript. Override with `PUSHOVER_NOTIFY_BACKEND`:
 
 Credential-role values are never passed as command-line values: the `--*-env` flags
 below name an environment variable, never its contents. Each command resolves the roles
-it needs — `app_token`, `user_key`, `team_token` — from the environment first, then from
-the config file. The one secret that does take a literal flag value is
+it needs — `app_token`, `user_key`, `team_token`, `encryption_key` — from the environment
+first, then from the config file. The one secret that does take a literal flag value is
 `povr team add-user --password`; omit it and no password is sent, which also keeps it
 out of your shell history and the process list.
 
@@ -76,7 +76,7 @@ Resolution order per role:
 1. The variable named by a `--*-env` flag, if one is given. If that variable is unset
    or empty the command fails; there is no fallback.
 2. The role's default variable: `PUSHOVER_APP_TOKEN`, `PUSHOVER_USER_KEY`,
-   `PUSHOVER_TEAM_TOKEN`.
+   `PUSHOVER_TEAM_TOKEN`, `PUSHOVER_ENCRYPTION_KEY`.
 3. `PUSHOVER_KEY`, but only for the command's *primary* role. The primary role is
    `app_token` for every command except `povr team ...`, where it is `team_token`.
 4. The config file (see below). Environment values always win over the file.
@@ -89,6 +89,7 @@ The `--*-env` flags name an environment **variable**, not a value:
 | `--token-env` | `app_token` |
 | `--user-env` | `user_key` |
 | `--team-env` | `team_token` |
+| `--encryption-key-env` | `encryption_key` |
 
 Role-specific flags take precedence over `--key-env` for the primary role.
 
@@ -102,11 +103,12 @@ povr send --token-env WORK_TOKEN "deploy finished"
 `~/.config/pushover/pushover.conf`, TOML:
 
 ```toml
-app_token  = "a0000000000000000000000000000"
-user_key   = "u0000000000000000000000000000"
-team_token = "t0000000000000000000000000000"
-api_url    = "https://api.pushover.net"
-ws_url     = "wss://client.pushover.net/push"
+app_token      = "a0000000000000000000000000000"
+user_key       = "u0000000000000000000000000000"
+team_token     = "t0000000000000000000000000000"
+encryption_key = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+api_url        = "https://api.pushover.net"
+ws_url         = "wss://client.pushover.net/push"
 ```
 
 All keys are optional. `api_url` and `ws_url` override the built-in endpoints and are
@@ -140,6 +142,12 @@ Flags: `--user` (comma-separated recipient or group keys), `--message`, `--devic
 `--title`, `--url`, `--url-title`, `--priority`, `--retry`, `--expire`, `--callback`,
 `--tags`, `--sound`, `--timestamp`, `--ttl`, `--html`, `--monospace`, `--encrypted`,
 `--attachment`, `--attachment-base64`, `--attachment-type`, `--json`.
+
+`--encrypted` encrypts `message`, `title`, `url`, and `url_title` client-side with
+AES-256-CBC and HMAC-SHA256 using [Pushover's documented e2ee scheme](https://pushover.net/api#e2ee).
+Generate a 64-character hex key with `openssl rand -hex 32` and configure it through
+`--encryption-key-env`, `PUSHOVER_ENCRYPTION_KEY`, or `encryption_key` in the config
+file. `--encrypted` fails without sending when no encryption key credential resolves.
 
 ```sh
 # attachment; 5242880 bytes maximum, --attachment and --attachment-base64 are exclusive

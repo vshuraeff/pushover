@@ -11,18 +11,19 @@ import (
 	"strings"
 	"testing"
 
+	pushovercrypto "github.com/vshuraeff/pushover/internal/crypto"
 	"github.com/vshuraeff/pushover/internal/mockpushover"
 )
 
 func TestSendEchoesEveryParameter(t *testing.T) {
 	h := newHarness(t, defaultSeed())
+	// client-side encryption inflates payloads; pushover's public docs do not specify plaintext or ciphertext limits, so this test omits url_title.
 	result := h.run(t,
 		"send", "full parameter message",
 		"--user", fixtureUserKey,
 		"--device", "phone",
 		"--title", "deployment",
 		"--url", "https://example.test/run/42",
-		"--url-title", "run details",
 		"--priority", "1",
 		"--retry", "31",
 		"--expire", "90",
@@ -46,14 +47,40 @@ func TestSendEchoesEveryParameter(t *testing.T) {
 		t.Fatalf("request = %s %s, want POST /1/messages.json", request.Method, request.Path)
 	}
 	wants := map[string]string{
-		"user": fixtureUserKey, "message": "full parameter message", "device": "phone",
-		"title": "deployment", "url": "https://example.test/run/42", "url_title": "run details",
+		"user": fixtureUserKey, "device": "phone",
 		"priority": "1", "retry": "31", "expire": "90", "callback": "https://example.test/callback",
 		"tags": "deploy,e2e", "sound": "e2e-custom", "timestamp": "1700000000", "ttl": "600",
 		"html": "1", "monospace": "1", "encrypted": "1",
 	}
 	for field, want := range wants {
 		requireField(t, request, field, want)
+	}
+	key, err := pushovercrypto.ParseKey(fixtureEncryptionKey)
+	if err != nil {
+		t.Fatalf("parse fixture encryption key: %v", err)
+	}
+	for field, want := range map[string]string{
+		"message": "full parameter message",
+		"title":   "deployment",
+		"url":     "https://example.test/run/42",
+	} {
+		values, ok := request.Fields[field]
+		if !ok || len(values) != 1 {
+			t.Fatalf("request field %q did not contain one encrypted value", field)
+		}
+		if values[0] == want {
+			t.Fatalf("request field %q was sent as plaintext", field)
+		}
+		plaintext, err := pushovercrypto.DecryptField(values[0], key)
+		if err != nil {
+			t.Fatalf("decrypt request field %q: %v", field, err)
+		}
+		if plaintext != want {
+			t.Fatalf("decrypted request field %q did not match the expected value", field)
+		}
+	}
+	if _, ok := request.Fields["url_title"]; ok {
+		t.Fatal("request unexpectedly contained url_title")
 	}
 }
 
