@@ -18,6 +18,7 @@ import (
 )
 
 type Config struct {
+	Addr         string
 	Logger       *log.Logger
 	InitialState *SeedState
 	ErrorShape   ErrorShape
@@ -31,6 +32,7 @@ type Server struct {
 	store       *store
 	defaultSeed SeedState
 	controlMux  *http.ServeMux
+	ws          webSocketState
 }
 
 func Start(cfg Config) (*Server, error) {
@@ -49,7 +51,11 @@ func Start(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	addr := cfg.Addr
+	if addr == "" {
+		addr = "127.0.0.1:0"
+	}
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
@@ -89,12 +95,13 @@ func (s *Server) Control() *ControlClient {
 	return &ControlClient{baseURL: s.url, client: s.client}
 }
 
-// registercontrolroute is the additive extension point for future control-plane transports.
+// RegisterControlRoute is the additive extension point for future control-plane transports.
 func (s *Server) RegisterControlRoute(pattern string, handler http.Handler) {
 	s.controlMux.Handle(pattern, handler)
 }
 
 func (s *Server) Close() error {
+	s.closeWebSocket()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := s.httpServer.Shutdown(ctx)
@@ -105,6 +112,7 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) registerRESTRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/push", s.handleWebSocket)
 	mux.HandleFunc("/1/messages.json", s.handleMessagesRoute)
 	mux.HandleFunc("/1/receipts/", s.handleReceipts)
 	mux.HandleFunc("/1/users/validate.json", s.handleValidateUser)
@@ -125,6 +133,9 @@ func (s *Server) registerRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/1/apps/limits.json", s.handleAppLimits)
 	mux.HandleFunc("/icons/", s.handleIcon)
 	mux.HandleFunc("/sounds/", s.handleSoundAsset)
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		s.writeError(w, http.StatusNotFound, "request", "endpoint was not found")
+	})
 }
 
 func (s *Server) apiMiddleware(next http.Handler) http.Handler {
@@ -140,7 +151,12 @@ func (s *Server) apiMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		if parseErr != nil {
-			s.writeError(w, http.StatusBadRequest, "request", "request body is invalid")
+			status := http.StatusBadRequest
+			var maxBytesError *http.MaxBytesError
+			if errors.As(parseErr, &maxBytesError) {
+				status = http.StatusRequestEntityTooLarge
+			}
+			s.writeError(w, status, "request", "request body is invalid")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -223,7 +239,21 @@ func writeFault(w http.ResponseWriter, rule FaultRule) {
 	if status == 0 {
 		status = http.StatusInternalServerError
 	}
-	w.Header().Set("Content-Type", "application/json")
+	isJSON := false
+	switch body := rule.Body.(type) {
+	case string:
+		isJSON = json.Valid([]byte(body))
+	case []byte:
+		isJSON = json.Valid(body)
+	case json.RawMessage:
+		isJSON = json.Valid(body)
+	case nil:
+	default:
+		isJSON = true
+	}
+	if isJSON {
+		w.Header().Set("Content-Type", "application/json")
+	}
 	w.WriteHeader(status)
 	switch body := rule.Body.(type) {
 	case nil:

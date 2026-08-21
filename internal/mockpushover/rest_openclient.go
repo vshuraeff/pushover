@@ -11,7 +11,7 @@ func (s *Server) handleOpenMessages(w http.ResponseWriter, r *http.Request) {
 	secret := r.FormValue("secret")
 	s.store.mu.RLock()
 	device, ok := s.store.devices[deviceID]
-	if ok && device.Secret == secret && secret != "" {
+	if ok && device.Enabled && device.Secret == secret && secret != "" {
 		messages := s.store.queues[deviceID]
 		copied := make([]Message, len(messages))
 		for i := range messages {
