@@ -78,6 +78,62 @@ func TestWebSocketEngine(t *testing.T) {
 		cancel()
 	})
 
+	t.Run("reconnect frame preserves accumulated backoff", func(t *testing.T) {
+		server := newWebSocketTestServer(t)
+		clock := newFakeClock()
+		var dialCount atomic.Int32
+		dials := make(chan int32, 4)
+		var logBuf bytes.Buffer
+		engine := testEngine(server.url(), clock)
+		engine.Logger = slog.New(slog.NewTextHandler(&logBuf, nil))
+		engine.Dialer = func(ctx context.Context, url string) (*websocket.Conn, *http.Response, error) {
+			dial := dialCount.Add(1)
+			dials <- dial
+			switch dial {
+			case 1, 2, 4:
+				return nil, nil, errors.New("forced dial failure")
+			default:
+				return websocket.Dial(ctx, url, nil)
+			}
+		}
+		cancel, _ := runTestEngine(t, engine)
+
+		for attempt := uint(0); attempt < 2; attempt++ {
+			if dial := waitForDial(t, dials); dial != int32(attempt+1) {
+				t.Fatalf("dial = %d, want %d", dial, attempt+1)
+			}
+			delay := clock.nextRequest(t)
+			if delay < 0 || delay >= backoffLimit(attempt) {
+				t.Fatalf("attempt %d delay = %v, want [0, %v)", attempt, delay, backoffLimit(attempt))
+			}
+			clock.Advance(delay)
+		}
+
+		conn := server.nextConnection(t)
+		if dial := waitForDial(t, dials); dial != 3 {
+			t.Fatalf("dial = %d, want 3", dial)
+		}
+		if duration := clock.nextRequest(t); duration != livenessTimeout {
+			t.Fatalf("liveness timer duration = %v, want %v", duration, livenessTimeout)
+		}
+		conn.sendFrame(t, 'R')
+
+		if duration := clock.nextRequest(t); duration != livenessTimeout {
+			t.Fatalf("reset liveness timer duration = %v, want %v", duration, livenessTimeout)
+		}
+		if dial := waitForDial(t, dials); dial != 4 {
+			t.Fatalf("dial after R frame = %d, want immediate dial 4", dial)
+		}
+		delay := clock.nextRequest(t)
+		if delay < 0 || delay >= backoffLimit(2) {
+			t.Fatalf("backoff after R frame = %v, want [0, %v)", delay, backoffLimit(2))
+		}
+		if !bytes.Contains(logBuf.Bytes(), []byte("attempt=2")) {
+			t.Fatalf("dial after R frame did not retain attempt 2: %q", logBuf.String())
+		}
+		cancel()
+	})
+
 	t.Run("permanent frame stops reconnecting", func(t *testing.T) {
 		server := newWebSocketTestServer(t)
 		engine := testEngine(server.url(), newFakeClock())
@@ -102,26 +158,48 @@ func TestWebSocketEngine(t *testing.T) {
 		server.expectNoConnection(t)
 	})
 
-	t.Run("liveness timeout reconnects", func(t *testing.T) {
+	t.Run("silent connections retain backoff", func(t *testing.T) {
 		server := newWebSocketTestServer(t)
 		clock := newFakeClock()
+		var dialCount atomic.Int32
+		dials := make(chan int32, 4)
+		var logBuf bytes.Buffer
 		engine := testEngine(server.url(), clock)
+		engine.Logger = slog.New(slog.NewTextHandler(&logBuf, nil))
+		engine.Dialer = func(ctx context.Context, url string) (*websocket.Conn, *http.Response, error) {
+			dial := dialCount.Add(1)
+			dials <- dial
+			if dial <= 3 {
+				return websocket.Dial(ctx, url, nil)
+			}
+			return nil, nil, errors.New("forced dial failure")
+		}
 		cancel, _ := runTestEngine(t, engine)
 
-		server.nextConnection(t)
-		if duration := clock.nextRequest(t); duration != 60*time.Second {
-			t.Fatalf("liveness timer duration = %v, want %v", duration, 60*time.Second)
+		for attempt := uint(0); attempt < 3; attempt++ {
+			if dial := waitForDial(t, dials); dial != int32(attempt+1) {
+				t.Fatalf("dial = %d, want %d", dial, attempt+1)
+			}
+			server.nextConnection(t)
+			if duration := clock.nextRequest(t); duration != livenessTimeout {
+				t.Fatalf("liveness timer duration = %v, want %v", duration, livenessTimeout)
+			}
+			clock.Advance(livenessTimeout)
+			delay := clock.nextRequest(t)
+			if delay < 0 || delay >= backoffLimit(attempt) {
+				t.Fatalf("attempt %d delay = %v, want [0, %v)", attempt, delay, backoffLimit(attempt))
+			}
+			clock.Advance(delay)
 		}
-		clock.Advance(61 * time.Second)
-		delay := clock.nextRequest(t)
-		if delay < 0 || delay >= time.Second {
-			t.Fatalf("first reconnect delay = %v, want [0, %v)", delay, time.Second)
-		}
-		clock.Advance(delay)
 
-		server.nextConnection(t)
-		if got := server.connectionCount.Load(); got != 2 {
-			t.Errorf("connection count = %d, want 2", got)
+		if dial := waitForDial(t, dials); dial != 4 {
+			t.Fatalf("dial = %d, want 4", dial)
+		}
+		if delay := clock.nextRequest(t); delay < 0 || delay >= backoffLimit(3) {
+			t.Fatalf("attempt 3 delay = %v, want [0, %v)", delay, backoffLimit(3))
+		}
+		if !bytes.Contains(logBuf.Bytes(), []byte("attempt=3")) {
+			t.Fatalf("silent connections reset backoff: %q", logBuf.String())
 		}
 		cancel()
 	})
@@ -191,13 +269,83 @@ func TestWebSocketEngine(t *testing.T) {
 		}
 	})
 
+	t.Run("connection shorter than stability threshold retains backoff", func(t *testing.T) {
+		server := newWebSocketTestServer(t)
+		clock := newFakeClock()
+		var dialCount atomic.Int32
+		dials := make(chan int32, 4)
+		var logBuf bytes.Buffer
+		engine := testEngine(server.url(), clock)
+		engine.Logger = slog.New(slog.NewTextHandler(&logBuf, nil))
+		engine.Dialer = func(ctx context.Context, url string) (*websocket.Conn, *http.Response, error) {
+			dial := dialCount.Add(1)
+			dials <- dial
+			switch dial {
+			case 1, 2, 4:
+				return nil, nil, errors.New("forced dial failure")
+			default:
+				return websocket.Dial(ctx, url, nil)
+			}
+		}
+		cancel, _ := runTestEngine(t, engine)
+
+		for attempt := uint(0); attempt < 2; attempt++ {
+			if dial := waitForDial(t, dials); dial != int32(attempt+1) {
+				t.Fatalf("dial = %d, want %d", dial, attempt+1)
+			}
+			delay := clock.nextRequest(t)
+			if delay < 0 || delay >= backoffLimit(attempt) {
+				t.Fatalf("attempt %d delay = %v, want [0, %v)", attempt, delay, backoffLimit(attempt))
+			}
+			clock.Advance(delay)
+		}
+
+		conn := server.nextConnection(t)
+		if dial := waitForDial(t, dials); dial != 3 {
+			t.Fatalf("dial = %d, want 3", dial)
+		}
+		if duration := clock.nextRequest(t); duration != livenessTimeout {
+			t.Fatalf("liveness timer duration = %v, want %v", duration, livenessTimeout)
+		}
+		clock.Advance(livenessTimeout - time.Second)
+		conn.sendFrame(t, '#')
+		if duration := clock.nextRequest(t); duration != livenessTimeout {
+			t.Fatalf("reset liveness timer duration = %v, want %v", duration, livenessTimeout)
+		}
+		clock.Advance(2 * time.Second)
+		if err := conn.conn.CloseNow(); err != nil {
+			t.Fatalf("close websocket connection: %v", err)
+		}
+
+		delay := clock.nextRequest(t)
+		if delay < 0 || delay >= backoffLimit(2) {
+			t.Fatalf("backoff after short connection = %v, want [0, %v)", delay, backoffLimit(2))
+		}
+		clock.Advance(delay)
+		if dial := waitForDial(t, dials); dial != 4 {
+			t.Fatalf("dial = %d, want 4", dial)
+		}
+		if delay := clock.nextRequest(t); delay < 0 || delay >= backoffLimit(3) {
+			t.Fatalf("attempt 3 delay = %v, want [0, %v)", delay, backoffLimit(3))
+		}
+		if !bytes.Contains(logBuf.Bytes(), []byte("attempt=3")) {
+			t.Fatalf("short connection reset backoff: %q", logBuf.String())
+		}
+		cancel()
+	})
+
 	t.Run("stable connection resets backoff to base", func(t *testing.T) {
 		server := newWebSocketTestServer(t)
 		clock := newFakeClock()
 		var dialCount atomic.Int32
+		dials := make(chan int32, 4)
+		var logBuf bytes.Buffer
 		engine := testEngine(server.url(), clock)
+		engine.Logger = slog.New(slog.NewTextHandler(&logBuf, nil))
 		engine.Dialer = func(ctx context.Context, url string) (*websocket.Conn, *http.Response, error) {
-			if dialCount.Add(1) <= 2 {
+			dial := dialCount.Add(1)
+			dials <- dial
+			if dial == 1 || dial == 2 || dial == 4 {
 				return nil, nil, errors.New("forced dial failure")
 			}
 			return websocket.Dial(ctx, url, nil)
@@ -205,23 +353,31 @@ func TestWebSocketEngine(t *testing.T) {
 		cancel, _ := runTestEngine(t, engine)
 
 		for attempt := uint(0); attempt < 2; attempt++ {
+			if dial := waitForDial(t, dials); dial != int32(attempt+1) {
+				t.Fatalf("dial = %d, want %d", dial, attempt+1)
+			}
 			delay := clock.nextRequest(t)
-			if delay < 0 || delay >= expectedBackoffBound(attempt) {
-				t.Fatalf("attempt %d delay = %v, want [0, %v)", attempt, delay, expectedBackoffBound(attempt))
+			if delay < 0 || delay >= backoffLimit(attempt) {
+				t.Fatalf("attempt %d delay = %v, want [0, %v)", attempt, delay, backoffLimit(attempt))
 			}
 			clock.Advance(delay)
 		}
 
 		conn := server.nextConnection(t)
+		if dial := waitForDial(t, dials); dial != 3 {
+			t.Fatalf("dial = %d, want 3", dial)
+		}
 		if duration := clock.nextRequest(t); duration != livenessTimeout {
 			t.Fatalf("liveness timer duration = %v, want %v", duration, livenessTimeout)
 		}
-		clock.Advance(59 * time.Second)
-		conn.sendFrame(t, '#')
-		if duration := clock.nextRequest(t); duration != livenessTimeout {
-			t.Fatalf("reset liveness timer duration = %v, want %v", duration, livenessTimeout)
+		for range 5 {
+			clock.Advance(59 * time.Second)
+			conn.sendFrame(t, '#')
+			if duration := clock.nextRequest(t); duration != livenessTimeout {
+				t.Fatalf("reset liveness timer duration = %v, want %v", duration, livenessTimeout)
+			}
 		}
-		clock.Advance(time.Second)
+		clock.Advance(6 * time.Second)
 		if err := conn.conn.CloseNow(); err != nil {
 			t.Fatalf("close websocket connection: %v", err)
 		}
@@ -229,6 +385,16 @@ func TestWebSocketEngine(t *testing.T) {
 		delay := clock.nextRequest(t)
 		if delay < 0 || delay >= backoffBase {
 			t.Fatalf("backoff after stable connection = %v, want [0, %v)", delay, backoffBase)
+		}
+		clock.Advance(delay)
+		if dial := waitForDial(t, dials); dial != 4 {
+			t.Fatalf("dial = %d, want 4", dial)
+		}
+		if delay := clock.nextRequest(t); delay < 0 || delay >= backoffLimit(1) {
+			t.Fatalf("attempt 1 delay = %v, want [0, %v)", delay, backoffLimit(1))
+		}
+		if !bytes.Contains(logBuf.Bytes(), []byte("attempt=1")) {
+			t.Fatalf("stable connection did not reset backoff: %q", logBuf.String())
 		}
 		cancel()
 	})
@@ -376,6 +542,17 @@ func waitForSignal(t *testing.T, signals <-chan struct{}, description string) {
 	case <-signals:
 	case <-time.After(2 * time.Second):
 		t.Fatalf("timed out waiting for %s", description)
+	}
+}
+
+func waitForDial(t *testing.T, dials <-chan int32) int32 {
+	t.Helper()
+	select {
+	case dial := <-dials:
+		return dial
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for dial")
+		return 0
 	}
 }
 

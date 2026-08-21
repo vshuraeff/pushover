@@ -13,9 +13,10 @@ import (
 )
 
 const (
-	livenessTimeout = 60 * time.Second
-	backoffBase     = time.Second
-	backoffCap      = 2 * time.Minute
+	livenessTimeout    = 60 * time.Second
+	stabilityThreshold = 5 * time.Minute
+	backoffBase        = time.Second
+	backoffCap         = 2 * time.Minute
 )
 
 var (
@@ -110,7 +111,6 @@ func (e *Engine) Run(ctx context.Context) error {
 		case connectionReplaced:
 			return ErrReplaced
 		case connectionImmediateReconnect:
-			attempt = 0
 			continue
 		case connectionFailed:
 			if stable {
@@ -157,13 +157,13 @@ func (e *Engine) serve(ctx context.Context, conn *websocket.Conn, clock Clock, l
 	for {
 		select {
 		case <-ctx.Done():
-			return connectionFailed, clock.Now().Sub(connectedAt) >= livenessTimeout
+			return connectionFailed, clock.Now().Sub(connectedAt) >= stabilityThreshold
 		case <-liveness.C():
-			return connectionFailed, true
+			return connectionFailed, clock.Now().Sub(connectedAt) >= stabilityThreshold
 		case result := <-reads:
 			if result.err != nil {
 				logger.Debug("websocket read failed", "attempt", attempt, "err", result.err)
-				return connectionFailed, clock.Now().Sub(connectedAt) >= livenessTimeout
+				return connectionFailed, clock.Now().Sub(connectedAt) >= stabilityThreshold
 			}
 			resetTimer(liveness, livenessTimeout)
 			if len(result.payload) == 0 {
