@@ -14,11 +14,21 @@ type ControlClient struct {
 	client  *http.Client
 }
 
+type WSStatus struct {
+	Connected     bool   `json:"connected"`
+	LoginDeviceID string `json:"login_device_id"`
+	LoginOK       bool   `json:"login_ok"`
+	ConnectCount  int    `json:"connect_count"`
+}
+
 func (s *Server) registerControlRoutes() {
 	s.RegisterControlRoute("POST /_control/reset", http.HandlerFunc(s.handleControlReset))
 	s.RegisterControlRoute("POST /_control/seed", http.HandlerFunc(s.handleControlSeed))
 	s.RegisterControlRoute("POST /_control/fault", http.HandlerFunc(s.handleControlFault))
 	s.RegisterControlRoute("GET /_control/requests", http.HandlerFunc(s.handleControlRequests))
+	s.RegisterControlRoute("POST /_control/ws/send", http.HandlerFunc(s.handleControlWSSend))
+	s.RegisterControlRoute("POST /_control/ws/close", http.HandlerFunc(s.handleControlWSClose))
+	s.RegisterControlRoute("GET /_control/ws/status", http.HandlerFunc(s.handleControlWSStatus))
 }
 
 func (s *Server) handleControlReset(w http.ResponseWriter, _ *http.Request) {
@@ -28,6 +38,7 @@ func (s *Server) handleControlReset(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	s.store.replace(seed)
+	s.resetWebSocket()
 	writeJSON(w, http.StatusOK, map[string]any{"status": 1})
 }
 
@@ -37,7 +48,7 @@ func (s *Server) handleControlSeed(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"status": 0, "error": err.Error()})
 		return
 	}
-	s.store.replace(seed)
+	s.store.replacePreservingErrorShape(seed)
 	writeJSON(w, http.StatusOK, map[string]any{"status": 1})
 }
 
@@ -80,6 +91,34 @@ func (s *Server) handleControlRequests(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, requests)
 }
 
+func (s *Server) handleControlWSSend(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Frame string `json:"frame"`
+	}
+	if err := decodeControlJSON(r, &request); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"status": 0, "error": err.Error()})
+		return
+	}
+	if len(request.Frame) != 1 || !strings.Contains("#!REA", request.Frame) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"status": 0, "error": "frame must be one of #, !, R, E, or A"})
+		return
+	}
+	if err := s.sendWebSocketFrame(request.Frame[0]); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{"status": 0, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": 1})
+}
+
+func (s *Server) handleControlWSClose(w http.ResponseWriter, _ *http.Request) {
+	s.closeWebSocket()
+	writeJSON(w, http.StatusOK, map[string]any{"status": 1})
+}
+
+func (s *Server) handleControlWSStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.webSocketStatus())
+}
+
 func decodeControlJSON(r *http.Request, target any) error {
 	decoder := json.NewDecoder(io.LimitReader(r.Body, 16<<20))
 	decoder.DisallowUnknownFields()
@@ -117,6 +156,35 @@ func (c *ControlClient) Requests() ([]JournaledRequest, error) {
 		return nil, err
 	}
 	return requests, nil
+}
+
+func (c *ControlClient) WSSend(frame string) error {
+	return c.post("/_control/ws/send", map[string]string{"frame": frame})
+}
+
+func (c *ControlClient) WSClose() error {
+	return c.post("/_control/ws/close", struct{}{})
+}
+
+func (c *ControlClient) WSStatus() (WSStatus, error) {
+	request, err := http.NewRequest(http.MethodGet, c.baseURL+"/_control/ws/status", nil)
+	if err != nil {
+		return WSStatus{}, err
+	}
+	response, err := c.client.Do(request)
+	if err != nil {
+		return WSStatus{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+		return WSStatus{}, fmt.Errorf("control ws status: status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var status WSStatus
+	if err := json.NewDecoder(response.Body).Decode(&status); err != nil {
+		return WSStatus{}, err
+	}
+	return status, nil
 }
 
 func (c *ControlClient) post(endpoint string, payload any) error {

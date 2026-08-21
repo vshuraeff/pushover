@@ -220,6 +220,15 @@ func (s *store) replace(seed SeedState) {
 	s.replaceLocked(seed)
 }
 
+func (s *store) replacePreservingErrorShape(seed SeedState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if seed.ErrorShape == "" {
+		seed.ErrorShape = s.errorShape
+	}
+	s.replaceLocked(seed)
+}
+
 func (s *store) replaceLocked(seed SeedState) {
 	s.apps = make(map[string]AppToken, len(seed.Tokens))
 	s.users = make(map[string]User, len(seed.Users))
@@ -288,9 +297,6 @@ func (s *store) replaceLocked(seed SeedState) {
 		}
 	}
 	for _, device := range seed.Devices {
-		if !device.Enabled {
-			device.Enabled = true
-		}
 		if device.Secret == "" {
 			device.Secret = s.users[device.User].Secret
 		}

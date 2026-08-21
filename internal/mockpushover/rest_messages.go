@@ -110,7 +110,9 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if app.Quota.Remaining <= 0 {
+		quota := app.Quota
 		s.store.mu.Unlock()
+		setQuotaHeaders(w, quota)
 		s.writeError(w, http.StatusTooManyRequests, "token", "has no remaining message quota")
 		return
 	}
