@@ -35,6 +35,7 @@ type HelperRequest struct {
 	Level      string       `json:"level"`
 	Thread     string       `json:"thread,omitempty"`
 	URL        string       `json:"url,omitempty"`
+	Category   string       `json:"category,omitempty"`
 }
 
 // helpersound is either a named system sound or a sound file path.
@@ -45,10 +46,12 @@ type HelperSound struct {
 
 // helperevent is a single line-delimited json event received from the helper.
 type HelperEvent struct {
-	Event string `json:"event"`
-	ID    string `json:"id,omitempty"`
-	Error string `json:"error,omitempty"`
-	URL   string `json:"url,omitempty"`
+	Event  string `json:"event"`
+	ID     string `json:"id,omitempty"`
+	Error  string `json:"error,omitempty"`
+	URL    string `json:"url,omitempty"`
+	Action string `json:"action,omitempty"`
+	Thread string `json:"thread,omitempty"`
 }
 
 type helperCommand func() *exec.Cmd
@@ -62,6 +65,7 @@ type HelperNotifier struct {
 	stdin       io.WriteCloser
 	pending     map[string]chan HelperEvent
 	processDone chan error
+	actions     chan ActionEvent
 	closed      bool
 
 	writeMu   sync.Mutex
@@ -94,6 +98,7 @@ func newHelperNotifier(command helperCommand) *HelperNotifier {
 	return &HelperNotifier{
 		command: command,
 		pending: make(map[string]chan HelperEvent),
+		actions: make(chan ActionEvent, 16),
 	}
 }
 
@@ -157,13 +162,19 @@ func (h *HelperNotifier) Notify(ctx context.Context, n Notification) error {
 
 // caps reports helper backend capabilities.
 func (*HelperNotifier) Caps() Caps {
-	return Caps{Images: true, Sound: true, Levels: true, Actions: false}
+	return Caps{Images: true, Sound: true, Levels: true, Actions: true}
+}
+
+// actions reports user actions received from the helper process.
+func (h *HelperNotifier) Actions() <-chan ActionEvent {
+	return h.actions
 }
 
 // close stops the helper process and waits for it to exit.
 func (h *HelperNotifier) Close() error {
 	h.closeOnce.Do(func() {
 		h.closeErr = h.closeProcess()
+		close(h.actions)
 	})
 	return h.closeErr
 }
@@ -213,6 +224,13 @@ func (h *HelperNotifier) readAndWait(cmd *exec.Cmd, stdout io.ReadCloser, done c
 	for scanner.Scan() {
 		var event HelperEvent
 		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			continue
+		}
+		if event.Event == "action" {
+			select {
+			case h.actions <- ActionEvent{ID: event.ID, Action: event.Action, Thread: event.Thread}:
+			default:
+			}
 			continue
 		}
 		if event.Event != "delivered" && event.Event != "error" {
@@ -327,6 +345,9 @@ func (h *HelperNotifier) request(n Notification) HelperRequest {
 		Level:      string(level),
 		Thread:     n.ThreadID,
 		URL:        n.URL,
+	}
+	if n.Priority == 2 {
+		request.Category = "povr.emergency"
 	}
 	if !SuppressSoundForLevel(level) {
 		switch {

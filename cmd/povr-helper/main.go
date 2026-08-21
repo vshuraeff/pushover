@@ -20,6 +20,7 @@ type helperRequest struct {
 	Level      string       `json:"level"`
 	Thread     string       `json:"thread,omitempty"`
 	URL        string       `json:"url,omitempty"`
+	Category   string       `json:"category,omitempty"`
 }
 
 type helperSound struct {
@@ -32,6 +33,8 @@ type helperEvent struct {
 	ID            string `json:"id,omitempty"`
 	Error         string `json:"error,omitempty"`
 	URL           string `json:"url,omitempty"`
+	Action        string `json:"action,omitempty"`
+	Thread        string `json:"thread,omitempty"`
 	Granted       *bool  `json:"granted,omitempty"`
 	TimeSensitive *bool  `json:"timeSensitive,omitempty"`
 	LevelFallback bool   `json:"levelFallback,omitempty"`

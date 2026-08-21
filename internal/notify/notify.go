@@ -36,6 +36,18 @@ type Notifier interface {
 	Caps() Caps
 }
 
+// actionevent describes a user-initiated action taken on a delivered notification.
+type ActionEvent struct {
+	ID     string
+	Action string
+	Thread string
+}
+
+// actionsource is implemented by notifier backends that report post-delivery actions.
+type ActionSource interface {
+	Actions() <-chan ActionEvent
+}
+
 // ErrNotImplemented indicates that notification delivery is unavailable on this platform.
 var ErrNotImplemented = errors.New("notify: backend not implemented on this platform")
 

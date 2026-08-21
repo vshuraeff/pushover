@@ -25,6 +25,8 @@ static NSMutableArray<NSData *> *povr_events;
 static NSLock *povr_events_lock;
 static CFRunLoopRef povr_main_run_loop;
 static _Atomic bool povr_time_sensitive_allowed;
+static NSString *const povr_emergency_category = @"povr.emergency";
+static NSString *const povr_ack_action = @"povr.ack";
 
 static NSString *povr_string(NSDictionary *dictionary, NSString *key) {
     id value = [dictionary objectForKey:key];
@@ -64,15 +66,29 @@ static void povr_did_receive(
     @autoreleasepool {
         NSDictionary *user_info = response.notification.request.content.userInfo;
         NSString *identifier = povr_string(user_info, @"id");
-        NSString *url = povr_string(user_info, @"url");
-        NSMutableDictionary *event = [NSMutableDictionary dictionaryWithObjectsAndKeys:
-            @"clicked", @"event",
-            identifier, @"id",
-            nil];
-        if (url.length > 0) {
-            [event setObject:url forKey:@"url"];
+        NSString *action_identifier = response.actionIdentifier;
+        if ([action_identifier isEqualToString:UNNotificationDefaultActionIdentifier]) {
+            NSString *url = povr_string(user_info, @"url");
+            NSMutableDictionary *event = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+                @"clicked", @"event",
+                identifier, @"id",
+                nil];
+            if (url.length > 0) {
+                [event setObject:url forKey:@"url"];
+            }
+            povr_enqueue_event(event);
+        } else if ([action_identifier isEqualToString:povr_ack_action]) {
+            NSString *thread = response.notification.request.content.threadIdentifier;
+            NSMutableDictionary *event = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+                @"action", @"event",
+                @"ack", @"action",
+                identifier, @"id",
+                nil];
+            if (thread.length > 0) {
+                [event setObject:thread forKey:@"thread"];
+            }
+            povr_enqueue_event(event);
         }
-        povr_enqueue_event(event);
     }
     completion_handler();
 }
@@ -133,6 +149,16 @@ static int povr_initialize(void) {
                 return -1;
             }
             povr_center.delegate = povr_delegate;
+            UNNotificationAction *ack_action = [UNNotificationAction
+                actionWithIdentifier:povr_ack_action
+                title:@"Acknowledge"
+                options:0];
+            UNNotificationCategory *emergency_category = [UNNotificationCategory
+                categoryWithIdentifier:povr_emergency_category
+                actions:@[ack_action]
+                intentIdentifiers:@[]
+                options:0];
+            [povr_center setNotificationCategories:[NSSet setWithObject:emergency_category]];
             return 0;
         } @catch (NSException *exception) {
             fprintf(stderr, "povr-helper: initialize notification center: %s\n", exception.reason.UTF8String);
@@ -187,6 +213,11 @@ static int povr_post_json(const char *request_json) {
         content.subtitle = povr_string(request, @"subtitle");
         content.body = povr_string(request, @"body");
         content.threadIdentifier = povr_string(request, @"thread");
+
+        NSString *category = povr_string(request, @"category");
+        if (category.length > 0) {
+            content.categoryIdentifier = category;
+        }
 
         NSString *url = povr_string(request, @"url");
         NSMutableDictionary *user_info = [NSMutableDictionary dictionaryWithObject:identifier forKey:@"id"];
