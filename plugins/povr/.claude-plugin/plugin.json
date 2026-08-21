@@ -1,0 +1,9 @@
+{
+  "name": "povr",
+  "description": "Configure the povr CLI, send Pushover notifications, and read incoming messages.",
+  "version": "0.1.0",
+  "author": {
+    "name": "vshuraeff"
+  },
+  "license": "MIT"
+}

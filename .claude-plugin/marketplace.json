@@ -1,0 +1,15 @@
+{
+  "name": "povr",
+  "description": "Pushover from the command line for agents: configure, send, receive.",
+  "owner": {
+    "name": "vshuraeff"
+  },
+  "plugins": [
+    {
+      "name": "povr",
+      "source": "./plugins/povr",
+      "description": "Configure the povr CLI, send Pushover notifications, and read incoming messages.",
+      "version": "0.1.0"
+    }
+  ]
+}
