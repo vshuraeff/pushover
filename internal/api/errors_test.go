@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -37,5 +38,20 @@ func TestAPIErrorUnmarshalsErrorShapes(t *testing.T) {
 				t.Errorf("errors = %#v, want %#v", apiError.Errors, test.want)
 			}
 		})
+	}
+}
+
+func TestQuotaErrorIncludesAPIMessageAndReset(t *testing.T) {
+	err := (&QuotaError{
+		Reset: "1900000123",
+		APIError: &APIError{
+			Errors: ErrorMessages{generalErrorsKey: {"monthly message limit exceeded"}},
+		},
+	}).Error()
+
+	for _, want := range []string{"monthly message limit exceeded", "1900000123"} {
+		if !strings.Contains(err, want) {
+			t.Errorf("Error() = %q, want substring %q", err, want)
+		}
 	}
 }
