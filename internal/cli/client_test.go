@@ -33,6 +33,31 @@ func TestClientFetchAndAckRequireSession(t *testing.T) {
 	}
 }
 
+func TestClientCommandsUseSessionStoreSelector(t *testing.T) {
+	t.Setenv("PUSHOVER_CONFIG_DIR", t.TempDir())
+	t.Setenv("PUSHOVER_SESSION_STORE", "invalid")
+
+	for _, args := range [][]string{
+		{"client", "login"},
+		{"client", "register", "--name", "bad name"},
+		{"client", "fetch"},
+		{"client", "ack", "fake-receipt-123"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			root, _, _ := clientRoot(args)
+			root.SetIn(strings.NewReader(""))
+
+			err := root.Execute()
+			if err == nil {
+				t.Fatal("Execute() error = nil")
+			}
+			if !strings.Contains(err.Error(), "create session store: unknown session_store \"invalid\"; expected \"file\" or \"keychain\"") {
+				t.Errorf("Execute() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestClientRegisterRejectsInvalidNameWithoutRequest(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {

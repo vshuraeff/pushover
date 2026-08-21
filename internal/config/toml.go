@@ -32,6 +32,7 @@ type TOMLConfig struct {
 	EncryptionKey string `toml:"encryption_key"`
 	APIURL        string `toml:"api_url"`
 	WSURL         string `toml:"ws_url"`
+	SessionStore  string `toml:"session_store"`
 }
 
 func LoadTOMLConfig() (*TOMLConfig, error) {
