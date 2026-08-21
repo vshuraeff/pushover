@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -12,10 +14,12 @@ func TestResolve(t *testing.T) {
 		primary     Role
 		flags       EnvFlags
 		env         map[string]string
+		tomlConfig  string
 		want        string
 		wantErr     bool
 		errContains []string
 		errAbsent   []string
+		wantConfig  bool
 	}{
 		{
 			name:    "specific app token environment variable",
@@ -51,6 +55,19 @@ func TestResolve(t *testing.T) {
 			errContains: []string{"TEST_APP_TOKEN", "unset or empty"},
 		},
 		{
+			name:    "key environment variable unset does not fall through",
+			role:    RoleAppToken,
+			primary: RoleAppToken,
+			flags:   EnvFlags{KeyEnv: "TEST_PRIMARY_KEY"},
+			env: map[string]string{
+				"PUSHOVER_APP_TOKEN": "test-app-token",
+				"PUSHOVER_KEY":       "test-primary-token",
+			},
+			tomlConfig:  "app_token = \"test-file-app-token\"\n",
+			wantErr:     true,
+			errContains: []string{"TEST_PRIMARY_KEY", "unset or empty"},
+		},
+		{
 			name:    "default user key environment variable",
 			role:    RoleUserKey,
 			primary: RoleAppToken,
@@ -81,6 +98,14 @@ func TestResolve(t *testing.T) {
 			primary:     RoleAppToken,
 			wantErr:     true,
 			errContains: []string{"PUSHOVER_APP_TOKEN, PUSHOVER_KEY"},
+			wantConfig:  true,
+		},
+		{
+			name:       "TOML credential fallback",
+			role:       RoleTeamToken,
+			primary:    RoleAppToken,
+			tomlConfig: "team_token = \"test-file-team-token\"\n",
+			want:       "test-file-team-token",
 		},
 		{
 			name:    "key env aliases primary role environment flag",
@@ -112,6 +137,8 @@ func TestResolve(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			configDir := t.TempDir()
+			t.Setenv("PUSHOVER_CONFIG_DIR", configDir)
 			for _, name := range []string{
 				"TEST_APP_TOKEN",
 				"TEST_PRIMARY_KEY",
@@ -127,6 +154,12 @@ func TestResolve(t *testing.T) {
 			for name, value := range tt.env {
 				t.Setenv(name, value)
 			}
+			if tt.tomlConfig != "" {
+				configPath := filepath.Join(configDir, tomlConfigFileName)
+				if err := os.WriteFile(configPath, []byte(tt.tomlConfig), 0o600); err != nil {
+					t.Fatalf("WriteFile() error = %v", err)
+				}
+			}
 
 			got, err := Resolve(tt.role, tt.primary, tt.flags)
 			if tt.wantErr {
@@ -141,6 +174,12 @@ func TestResolve(t *testing.T) {
 				for _, unwanted := range tt.errAbsent {
 					if strings.Contains(err.Error(), unwanted) {
 						t.Errorf("Resolve() error = %q, must not contain %q", err, unwanted)
+					}
+				}
+				if tt.wantConfig {
+					configPath := filepath.Join(configDir, tomlConfigFileName)
+					if !strings.Contains(err.Error(), configPath) || !strings.Contains(err.Error(), string(tt.role)) {
+						t.Error("Resolve() error does not identify the config file and key")
 					}
 				}
 				return

@@ -57,7 +57,19 @@ func Resolve(role, primary Role, flags EnvFlags) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("missing %s credential; checked environment variables: %s", role, strings.Join(checked, ", "))
+	configPath, err := tomlConfigPath()
+	if err != nil {
+		return "", fmt.Errorf("find credential config file: %w", err)
+	}
+	tomlConfig, err := loadTOMLConfig(configPath)
+	if err != nil {
+		return "", fmt.Errorf("load credential config: %w", err)
+	}
+	if value := tomlConfig.credential(role); value != "" {
+		return value, nil
+	}
+
+	return "", fmt.Errorf("missing %s credential; checked environment variables: %s; config file %q (key %q)", role, strings.Join(checked, ", "), configPath, role)
 }
 
 func isKnownRole(role Role) bool {
