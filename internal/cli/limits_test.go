@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/vshuraeff/pushover/internal/api"
@@ -38,5 +39,18 @@ func TestLimitsCommand(t *testing.T) {
 	}
 	if limits.Limit != 10000 || limits.Remaining != 9999 || limits.Reset != 1_700_000_000 {
 		t.Errorf("limits = %+v", limits)
+	}
+	if limits.Header != (api.RateLimits{Limit: "10000", Remaining: "9999", Reset: "1700000000"}) {
+		t.Errorf("limits header = %+v", limits.Header)
+	}
+
+	humanOutput, err := executeCLI(t, nil, "limits")
+	if err != nil {
+		t.Fatalf("povr limits error = %v", err)
+	}
+	for _, want := range []string{"header_limit: 10000", "header_remaining: 9999", "header_reset: 1700000000"} {
+		if !strings.Contains(humanOutput, want) {
+			t.Errorf("limits output = %q, want it to contain %q", humanOutput, want)
+		}
 	}
 }

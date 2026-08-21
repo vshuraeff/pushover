@@ -20,7 +20,7 @@ func TestSendCommandFullFlags(t *testing.T) {
 			t.Fatalf("ParseForm() error = %v", err)
 		}
 		for name, want := range map[string]string{
-			"user": "direct-user", "message": "message", "device": "phone", "title": "title",
+			"user": "direct-user,group-key", "message": "message", "device": "phone", "title": "title",
 			"url": "https://example.test", "url_title": "example", "priority": "2", "retry": "30",
 			"expire": "3600", "callback": "https://example.test/callback", "tags": "release",
 			"sound": "siren", "timestamp": "1700000000", "ttl": "120", "html": "1",
@@ -39,7 +39,7 @@ func TestSendCommandFullFlags(t *testing.T) {
 	configureCLITestEnv(t, server.URL)
 
 	output, err := executeCLI(t, nil,
-		"send", "--user", "direct-user", "--device", "phone", "--title", "title",
+		"send", "--user", " direct-user, group-key ", "--device", "phone", "--title", "title",
 		"--url", "https://example.test", "--url-title", "example", "--priority", "2", "--retry", "30",
 		"--expire", "3600", "--callback", "https://example.test/callback", "--tags", "release",
 		"--sound", "siren", "--timestamp", "1700000000", "--ttl", "120", "--html", "--monospace",
@@ -97,6 +97,37 @@ func TestSendCommandSurfacesValidationError(t *testing.T) {
 	}
 }
 
+func TestSendCommandValidatesRecipientFlag(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	configureCLITestEnv(t, server.URL)
+	t.Setenv("PUSHOVER_USER_KEY", "")
+
+	keys := make([]string, 51)
+	for i := range keys {
+		keys[i] = "recipient"
+	}
+	_, err := executeCLI(t, nil, "send", "--user", strings.Join(keys, ","), "message")
+	if err == nil || !strings.Contains(err.Error(), "between 1 and 50 recipients") {
+		t.Errorf("povr send error = %v, want recipient count validation error", err)
+	}
+	if requests != 0 {
+		t.Errorf("requests = %d, want 0", requests)
+	}
+
+	_, err = executeCLI(t, nil, "send", "--user", "", "message")
+	if err == nil || !strings.Contains(err.Error(), "between 1 and 50 recipients") {
+		t.Errorf("povr send error = %v, want missing recipient validation error", err)
+	}
+	if requests != 0 {
+		t.Errorf("requests = %d, want 0", requests)
+	}
+}
+
 func TestSendCommandAttachment(t *testing.T) {
 	attachmentPath := filepath.Join(t.TempDir(), "attachment.txt")
 	if err := os.WriteFile(attachmentPath, []byte("attachment data"), 0o600); err != nil {
@@ -124,6 +155,35 @@ func TestSendCommandAttachment(t *testing.T) {
 	configureCLITestEnv(t, server.URL)
 
 	output, err := executeCLI(t, nil, "send", "--attachment", attachmentPath, "message")
+	if err != nil {
+		t.Fatalf("povr send error = %v", err)
+	}
+	if !strings.Contains(output, "request: request-id") {
+		t.Errorf("send output = %q", output)
+	}
+}
+
+func TestSendCommandBase64Attachment(t *testing.T) {
+	attachmentPath := filepath.Join(t.TempDir(), "attachment.txt")
+	if err := os.WriteFile(attachmentPath, []byte("base64 data"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm() error = %v", err)
+		}
+		if got := r.Form.Get("attachment_base64"); got != "YmFzZTY0IGRhdGE=" {
+			t.Errorf("attachment_base64 = %q, want encoded attachment", got)
+		}
+		if got := r.Form.Get("attachment_type"); got != "application/x-test" {
+			t.Errorf("attachment_type = %q, want application/x-test", got)
+		}
+		_, _ = w.Write([]byte(`{"status":1,"request":"request-id"}`))
+	}))
+	defer server.Close()
+	configureCLITestEnv(t, server.URL)
+
+	output, err := executeCLI(t, nil, "send", "--attachment-base64", attachmentPath, "--attachment-type", "application/x-test", "message")
 	if err != nil {
 		t.Fatalf("povr send error = %v", err)
 	}

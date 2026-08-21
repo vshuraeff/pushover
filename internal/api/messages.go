@@ -14,7 +14,7 @@ import (
 	"unicode/utf8"
 )
 
-const maxAttachmentBytes = 5_242_880
+const MaxAttachmentBytes = 5_242_880
 
 type SendMessageRequest struct {
 	Token            string
@@ -157,8 +157,8 @@ func validateSendMessage(req SendMessageRequest) error {
 	if req.Attachment != nil && req.AttachmentBase64 != nil {
 		return fmt.Errorf("only one attachment may be set")
 	}
-	if len(req.AttachmentBase64) > maxAttachmentBytes {
-		return fmt.Errorf("attachment exceeds %d bytes", maxAttachmentBytes)
+	if len(req.AttachmentBase64) > MaxAttachmentBytes {
+		return fmt.Errorf("attachment exceeds %d bytes", MaxAttachmentBytes)
 	}
 	if req.Attachment != nil {
 		if err := validateAttachment(req.Attachment); err != nil {
@@ -175,15 +175,15 @@ func validateAttachment(attachment *FilePart) error {
 	if _, err := attachment.Reader.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf("seek attachment to start: %w", err)
 	}
-	data, readErr := io.ReadAll(io.LimitReader(attachment.Reader, maxAttachmentBytes+1))
+	data, readErr := io.ReadAll(io.LimitReader(attachment.Reader, MaxAttachmentBytes+1))
 	if _, err := attachment.Reader.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf("reset attachment to start: %w", err)
 	}
 	if readErr != nil {
 		return fmt.Errorf("read attachment: %w", readErr)
 	}
-	if len(data) > maxAttachmentBytes {
-		return fmt.Errorf("attachment exceeds %d bytes", maxAttachmentBytes)
+	if len(data) > MaxAttachmentBytes {
+		return fmt.Errorf("attachment exceeds %d bytes", MaxAttachmentBytes)
 	}
 	return nil
 }

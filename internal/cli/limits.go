@@ -37,7 +37,7 @@ func newLimitsCommand() *cobra.Command {
 			if jsonOutput {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(limits)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "limit: %d\nremaining: %d\nreset: %d\n", limits.Limit, limits.Remaining, limits.Reset)
+			fmt.Fprintf(cmd.OutOrStdout(), "limit: %d\nremaining: %d\nreset: %d\nheader_limit: %s\nheader_remaining: %s\nheader_reset: %s\n", limits.Limit, limits.Remaining, limits.Reset, limits.Header.Limit, limits.Header.Remaining, limits.Header.Reset)
 			return nil
 		},
 	}

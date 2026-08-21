@@ -143,7 +143,7 @@ func TestSendMessageValidation(t *testing.T) {
 
 	priorityTooHigh := 3
 	emergency := 2
-	overLimit := make([]byte, maxAttachmentBytes+1)
+	overLimit := make([]byte, MaxAttachmentBytes+1)
 	valid := func() SendMessageRequest {
 		return SendMessageRequest{Token: "test-token", User: []string{"user-one"}, Message: "message"}
 	}

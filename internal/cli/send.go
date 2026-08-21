@@ -7,13 +7,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/vshuraeff/pushover/internal/api"
 	"github.com/vshuraeff/pushover/internal/config"
 )
-
-const maxCLIResourceBytes = 5_242_880
 
 func init() {
 	register(func(root *cobra.Command) {
@@ -23,7 +22,7 @@ func init() {
 
 func newSendCommand() *cobra.Command {
 	var (
-		userPath             string
+		recipientFlag        string
 		messageFlag          string
 		device               string
 		title                string
@@ -68,16 +67,19 @@ func newSendCommand() *cobra.Command {
 				return err
 			}
 			userSet := cmd.Flags().Changed("user")
-			user := userPath
+			var recipients []string
 			if !userSet {
-				user, err = config.Resolve(config.RoleUserKey, config.RoleAppToken, envFlags)
+				user, err := config.Resolve(config.RoleUserKey, config.RoleAppToken, envFlags)
 				if err != nil {
 					return err
 				}
+				recipients = []string{user}
+			} else {
+				recipients = recipientKeys(recipientFlag)
 			}
 
 			req := api.SendMessageRequest{
-				Token: token, User: []string{user}, Message: message, Device: device,
+				Token: token, User: recipients, Message: message, Device: device,
 				Title: title, URL: messageURL, URLTitle: urlTitle, Retry: retry, Expire: expire,
 				Callback: callback, Tags: tags, Sound: sound, Timestamp: timestamp, TTL: ttl,
 				HTML: html, Monospace: monospace, Encrypted: encrypted,
@@ -96,8 +98,8 @@ func newSendCommand() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("stat attachment: %w", err)
 				}
-				if info.Size() > maxCLIResourceBytes {
-					return fmt.Errorf("attachment exceeds %d bytes", maxCLIResourceBytes)
+				if info.Size() > api.MaxAttachmentBytes {
+					return fmt.Errorf("attachment exceeds %d bytes", api.MaxAttachmentBytes)
 				}
 				req.Attachment = &api.FilePart{FileName: filepath.Base(attachmentPath), Reader: file}
 			}
@@ -106,8 +108,8 @@ func newSendCommand() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("read base64 attachment: %w", err)
 				}
-				if len(data) > maxCLIResourceBytes {
-					return fmt.Errorf("attachment exceeds %d bytes", maxCLIResourceBytes)
+				if len(data) > api.MaxAttachmentBytes {
+					return fmt.Errorf("attachment exceeds %d bytes", api.MaxAttachmentBytes)
 				}
 				req.AttachmentBase64 = data
 				req.AttachmentType = attachmentType
@@ -132,7 +134,7 @@ func newSendCommand() *cobra.Command {
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&userPath, "user", "", "recipient user or group key")
+	flags.StringVar(&recipientFlag, "user", "", "recipient user or group key")
 	flags.StringVar(&messageFlag, "message", "", "message text")
 	flags.StringVar(&device, "device", "", "target device name")
 	flags.StringVar(&title, "title", "", "message title")
@@ -171,4 +173,15 @@ func sendMessageText(cmd *cobra.Command, args []string, messageFlag string) (str
 		return "", fmt.Errorf("message is required")
 	}
 	return messageFlag, nil
+}
+
+func recipientKeys(value string) []string {
+	entries := strings.Split(value, ",")
+	recipients := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if recipient := strings.TrimSpace(entry); recipient != "" {
+			recipients = append(recipients, recipient)
+		}
+	}
+	return recipients
 }

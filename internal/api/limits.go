@@ -13,7 +13,7 @@ type AppLimits struct {
 	Limit     int        `json:"limit"`
 	Remaining int        `json:"remaining"`
 	Reset     int64      `json:"reset"`
-	Header    RateLimits `json:"-"`
+	Header    RateLimits `json:"header"`
 }
 
 func (c *Client) AppLimits(ctx context.Context, token string, options ...RequestOption) (*AppLimits, error) {
