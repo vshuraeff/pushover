@@ -28,6 +28,9 @@ fi
 echo "assembling Povr.app bundle"
 mkdir -p "$bundle_path/Contents/MacOS" "$bundle_path/Contents/Resources"
 cp "$repo_root/scripts/Info.plist" "$bundle_path/Contents/Info.plist"
+if [[ -f "$repo_root/assets/icon/povr.icns" ]]; then
+	cp "$repo_root/assets/icon/povr.icns" "$bundle_path/Contents/Resources/povr.icns"
+fi
 
 echo "building povr-helper"
 (
@@ -36,10 +39,12 @@ echo "building povr-helper"
 )
 
 echo "signing Povr.app"
-codesign -s - \
-	--entitlements "$repo_root/scripts/helper-entitlements.plist" \
-	--force \
-	"$bundle_path"
+if [[ -n "${POVR_HELPER_ENTITLEMENTS:-}" ]]; then
+	codesign --force --sign - --entitlements "$POVR_HELPER_ENTITLEMENTS" "$bundle_path"
+else
+	# restricted entitlements with ad-hoc signing make amfi sigkill the process at launch.
+	codesign --force --sign - "$bundle_path"
+fi
 
 install_parent="$HOME/Library/Application Support/povr"
 install_path="$install_parent/Povr.app"

@@ -28,6 +28,16 @@ Two halves:
 go build ./cmd/povr        # or: make build
 ```
 
+### Install via Homebrew
+
+```sh
+brew tap vshuraeff/povr && brew install povr
+# or: brew install vshuraeff/povr/povr
+```
+
+Until `v0.1.0` is tagged, use `brew install --HEAD vshuraeff/povr/povr`. Run
+`povr helper install` after installing or upgrading to enable native macOS notifications.
+
 `make` targets: `build`, `test` (`go test ./...`), `vet`, `e2e`
 (`go test -tags e2e ./...`), `fmt`, `tidy`, `clean`.
 
