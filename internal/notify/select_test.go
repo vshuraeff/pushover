@@ -11,6 +11,14 @@ import (
 func TestSelectBackendOverride(t *testing.T) {
 	home := t.TempDir()
 	binDir := t.TempDir()
+	bundlePath := filepath.Join(home, "Library", "Application Support", "povr", "Povr.app")
+	helperDir := filepath.Join(bundlePath, "Contents", "MacOS")
+	if err := os.MkdirAll(helperDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "povr-helper"), []byte("helper"), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
 	alerterPath := filepath.Join(binDir, "alerter")
 	if err := os.WriteFile(alerterPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -25,7 +33,7 @@ func TestSelectBackendOverride(t *testing.T) {
 		wantErr  bool
 		wantCaps Caps
 	}{
-		{name: "helper", backend: "helper", wantErr: runtime.GOOS != "darwin", wantCaps: Caps{Images: true, Sound: true, Levels: true, Actions: true}},
+		{name: "helper", backend: "helper", wantErr: runtime.GOOS != "darwin", wantCaps: Caps{Images: true, Sound: true, Levels: true, Actions: false}},
 		{name: "alerter", backend: "alerter", wantErr: runtime.GOOS != "darwin", wantCaps: Caps{Images: true, Sound: true}},
 		{name: "osascript", backend: "osascript", wantErr: runtime.GOOS != "darwin", wantCaps: Caps{Sound: true}},
 		{name: "file", backend: "file:" + filePath, wantCaps: Caps{Images: true, Sound: true, Levels: true}},
