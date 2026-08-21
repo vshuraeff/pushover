@@ -1,7 +1,10 @@
 .PHONY: build test vet e2e fmt tidy clean
 
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X github.com/vshuraeff/pushover/internal/cli.Version=$(VERSION)
+
 build:
-	go build ./cmd/povr
+	go build -ldflags "$(LDFLAGS)" ./cmd/povr
 
 test:
 	go test ./...
