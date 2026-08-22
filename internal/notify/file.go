@@ -42,9 +42,13 @@ func NewFileNotifier(path string) (*FileNotifier, error) {
 }
 
 func newFileNotifier(path string, consumeFiles bool) (*FileNotifier, error) {
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
+	}
+	if err := file.Chmod(0o600); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("chmod notification file: %w", err)
 	}
 
 	return &FileNotifier{file: file, path: path, consumeFiles: consumeFiles}, nil

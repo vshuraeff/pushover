@@ -63,6 +63,12 @@ Backend selection on macOS, in order: the installed helper bundle, then `alerter
 it is on `PATH`, then AppleScript. Override with `PUSHOVER_NOTIFY_BACKEND`:
 `helper`, `alerter`, `osascript`, or `file:<path>`.
 
+Decrypted `--encrypted` message content is only protected in transit; locally it is
+handed to the notification backend. With the `alerter` or `osascript` fallback backends
+it is passed as a process argument, visible to any local observer via `ps`; the `file`
+backend writes it to disk (permissions `0600`). The default `helper` backend (macOS
+`UNUserNotificationCenter`) is not affected by either limitation.
+
 ## Credentials
 
 Credential-role values are never passed as command-line values: the `--*-env` flags
