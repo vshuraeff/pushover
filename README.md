@@ -127,7 +127,10 @@ device name, session secret and last processed message id. **The account passwor
 never stored** — only the secret the server returns. Set `PUSHOVER_CONFIG_DIR` to move
 both the config file and the state file elsewhere. Set `session_store = "keychain"`
 (or `PUSHOVER_SESSION_STORE=keychain`) to keep the session in the macOS Keychain
-instead of `state.json`; an unrecognized value makes all client commands fail closed.
+instead of `state.json`; an unrecognized value makes every `povr client` subcommand
+(`login`, `register`, `fetch`, `ack`, `listen`) fail closed. `povr daemon` commands
+never construct a session store and are unaffected, though the installed agent runs
+`povr client listen`, which does.
 
 ## Command reference
 
