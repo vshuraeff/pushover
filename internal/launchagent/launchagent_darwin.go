@@ -13,17 +13,24 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const plistFilename = Label + ".plist"
 
 const plistDocType = `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">`
 
+const bootstrapAttempts = 3
+
+const bootstrapRetryDelay = 200 * time.Millisecond
+
 type execRunner func(ctx context.Context, name string, args ...string) (stdout []byte, err error)
 
 var execCommand execRunner = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, name, args...).Output()
 }
+
+var osExecutable = os.Executable
 
 func Install(opts InstallOptions) error {
 	executable, err := executablePath(opts.Executable)
@@ -43,13 +50,13 @@ func Install(opts InstallOptions) error {
 	} else if bootoutErr != nil {
 		bootoutErr = launchctlError("bootout", domainLabel(), bootoutErr)
 	}
-	if err := bootstrap(plistPath); err != nil {
+	if err := bootstrapWithRetry(plistPath, bootoutErr); err != nil {
 		if bootoutErr != nil {
 			return fmt.Errorf("%v; %w", bootoutErr, err)
 		}
 		return err
 	}
-	return bootoutErr
+	return nil
 }
 
 func Uninstall(opts UninstallOptions) error {
@@ -132,6 +139,9 @@ func Status(opts StatusOptions) (StatusResult, error) {
 
 	loaded, output := serviceStatus()
 	if !loaded {
+		if !isServiceNotFound(output.err) {
+			return StatusResult{}, launchctlError("print", domainLabel(), output.err)
+		}
 		result.Detail = launchctlError("print", domainLabel(), output.err).Error()
 		return result, nil
 	}
@@ -179,18 +189,38 @@ func bootstrap(plistPath string) error {
 	return nil
 }
 
+func bootstrapWithRetry(plistPath string, bootoutErr error) error {
+	err := bootstrap(plistPath)
+	for attempt := 1; attempt < bootstrapAttempts && isBootstrapRetryable(bootoutErr, err); attempt++ {
+		time.Sleep(bootstrapRetryDelay)
+		err = bootstrap(plistPath)
+	}
+	return err
+}
+
 func bootout() error {
 	_, err := execCommand(context.Background(), "launchctl", "bootout", domainLabel())
 	return err
 }
 
 func isServiceNotLoaded(err error) bool {
+	return hasLaunchctlExitCode(err, 3)
+}
+
+func isServiceNotFound(err error) bool {
+	return hasLaunchctlExitCode(err, 113) || hasLaunchctlExitCode(err, 3)
+}
+
+func isBootstrapRetryable(bootoutErr, bootstrapErr error) bool {
+	return hasLaunchctlExitCode(bootoutErr, 36) && hasLaunchctlExitCode(bootstrapErr, 5)
+}
+
+func hasLaunchctlExitCode(err error, code int) bool {
 	var exitError *exec.ExitError
 	if !errors.As(err, &exitError) {
 		return false
 	}
-	// launchctl reports an unloaded service as ESRCH (exit code 3).
-	return exitError.ExitCode() == 3
+	return exitError.ExitCode() == code
 }
 
 func domainLabel() string {
@@ -210,10 +240,14 @@ func launchctlError(action, target string, err error) error {
 func executablePath(path string) (string, error) {
 	if path == "" {
 		var err error
-		path, err = os.Executable()
+		path, err = osExecutable()
 		if err != nil {
 			return "", fmt.Errorf("launchagent: locate executable: %w", err)
 		}
+		if _, err := os.Stat(path); err != nil {
+			return "", fmt.Errorf("launchagent: inspect executable %q: %w", path, err)
+		}
+		return path, nil
 	}
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
