@@ -125,6 +125,32 @@ func TestInstallIgnoresUnloadedService(t *testing.T) {
 	}
 }
 
+func TestInstallWritesPlistBeforeBootout(t *testing.T) {
+	dest := t.TempDir()
+	executable := testExecutable(t, dest)
+	plistPath := filepath.Join(dest, plistFilename)
+	var bootoutPlistErr error
+	invocations := swapExecCommandRunner(t, func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if args[0] == "bootout" {
+			_, bootoutPlistErr = os.Stat(plistPath)
+		}
+		return nil, nil
+	})
+
+	if err := Install(InstallOptions{Executable: executable, Dest: dest}); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if bootoutPlistErr != nil {
+		t.Errorf("Stat(plist before bootout) error = %v", bootoutPlistErr)
+	}
+	if got, want := *invocations, []commandInvocation{
+		{name: "launchctl", args: []string{"bootout", domainLabel()}},
+		{name: "launchctl", args: []string{"bootstrap", guiDomain(), plistPath}},
+	}; !equalInvocations(got, want) {
+		t.Errorf("launchctl invocations = %#v, want %#v", got, want)
+	}
+}
+
 func TestInstallSucceedsWhenBootoutFailsButBootstrapSucceeds(t *testing.T) {
 	dest := t.TempDir()
 	executable := testExecutable(t, dest)
@@ -358,6 +384,28 @@ func TestRestartKickstartsLoadedService(t *testing.T) {
 	}
 }
 
+func TestRestartFallsBackToStartWhenNotLoaded(t *testing.T) {
+	dest := t.TempDir()
+	plistPath := writeTestPlist(t, dest)
+	invocations := swapExecCommandRunner(t, func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if args[0] == "print" {
+			return nil, launchctlExitError(t, 3)
+		}
+		return nil, nil
+	})
+
+	if err := Restart(RestartOptions{Dest: dest}); err != nil {
+		t.Fatalf("Restart() error = %v", err)
+	}
+	if got, want := *invocations, []commandInvocation{
+		{name: "launchctl", args: []string{"print", domainLabel()}},
+		{name: "launchctl", args: []string{"print", domainLabel()}},
+		{name: "launchctl", args: []string{"bootstrap", guiDomain(), plistPath}},
+	}; !equalInvocations(got, want) {
+		t.Errorf("launchctl invocations = %#v, want %#v", got, want)
+	}
+}
+
 func TestStatusReportsPlistAndServiceDetails(t *testing.T) {
 	dest := t.TempDir()
 	writeTestPlist(t, dest)
@@ -439,6 +487,38 @@ func TestWritePlistRemovesTemporaryFileAfterRenameFailure(t *testing.T) {
 	err := writePlist(path, "/tmp/povr")
 	if err == nil {
 		t.Fatal("writePlist() error = nil, want error")
+	}
+	files, err := filepath.Glob(filepath.Join(dest, "."+plistFilename+".*"))
+	if err != nil {
+		t.Fatalf("Glob() error = %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("temporary plist files = %q, want none", files)
+	}
+}
+
+func TestWritePlistWritesCompleteContentWithoutLeftovers(t *testing.T) {
+	dest := t.TempDir()
+	path := filepath.Join(dest, plistFilename)
+	if err := writePlist(path, "/tmp/povr"); err != nil {
+		t.Fatalf("writePlist() error = %v", err)
+	}
+
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	values := decodePlistValues(t, contents)
+	if got := values["Label"].Text; got != Label {
+		t.Errorf("Label = %q, want %q", got, Label)
+	}
+	if got, want := elementTexts(values["ProgramArguments"].Elements), []string{"/tmp/povr", "client", "listen"}; !equalStrings(got, want) {
+		t.Errorf("ProgramArguments = %q, want %q", got, want)
+	}
+	for _, key := range []string{"RunAtLoad", "KeepAlive"} {
+		if got := values[key].XMLName.Local; got != "true" {
+			t.Errorf("%s = <%s>, want <true>", key, got)
+		}
 	}
 	files, err := filepath.Glob(filepath.Join(dest, "."+plistFilename+".*"))
 	if err != nil {

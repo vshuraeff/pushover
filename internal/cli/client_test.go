@@ -33,6 +33,24 @@ func TestClientFetchAndAckRequireSession(t *testing.T) {
 	}
 }
 
+func TestClientCommandsExcludeDaemonVerbs(t *testing.T) {
+	root := NewRootCommand()
+	Register(root)
+	client, _, err := root.Find([]string{"client"})
+	if err != nil {
+		t.Fatalf("Find(client) error = %v", err)
+	}
+	var commands []string
+	for _, command := range client.Commands() {
+		commands = append(commands, command.Name())
+	}
+	for _, name := range commands {
+		if name == "install" || name == "uninstall" || name == "start" || name == "stop" || name == "restart" || name == "status" || strings.HasSuffix(name, "-daemon") {
+			t.Errorf("client command = %q, want no daemon command", name)
+		}
+	}
+}
+
 func TestClientCommandsUseSessionStoreSelector(t *testing.T) {
 	t.Setenv("PUSHOVER_CONFIG_DIR", t.TempDir())
 	t.Setenv("PUSHOVER_SESSION_STORE", "invalid")
