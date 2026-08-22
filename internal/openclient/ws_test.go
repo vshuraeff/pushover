@@ -159,6 +159,82 @@ func TestWebSocketEngine(t *testing.T) {
 		cancel()
 	})
 
+	t.Run("reconnect frame flood applies backoff", func(t *testing.T) {
+		server := newWebSocketTestServer(t)
+		clock := newFakeClock()
+		var dialCount atomic.Int32
+		var logBuf bytes.Buffer
+		engine := testEngine(server.url(), clock)
+		engine.Logger = slog.New(slog.NewTextHandler(&logBuf, nil))
+		engine.Dialer = func(ctx context.Context, url string) (*websocket.Conn, *http.Response, error) {
+			if dialCount.Add(1) <= int32(maxConsecutiveRReconnects*2) {
+				return websocket.Dial(ctx, url, nil)
+			}
+			return nil, nil, errors.New("forced dial failure")
+		}
+		cancel, _ := runTestEngine(t, engine)
+
+		for reconnect := uint(0); reconnect < maxConsecutiveRReconnects*2; reconnect++ {
+			conn := server.nextConnection(t)
+			if duration := clock.nextRequest(t); duration != livenessTimeout {
+				t.Fatalf("liveness timer duration = %v, want %v", duration, livenessTimeout)
+			}
+			conn.sendFrame(t, 'R')
+			if duration := clock.nextRequest(t); duration != livenessTimeout {
+				t.Fatalf("reset liveness timer duration = %v, want %v", duration, livenessTimeout)
+			}
+			if (reconnect+1)%maxConsecutiveRReconnects == 0 {
+				attempt := reconnect / maxConsecutiveRReconnects
+				delay := clock.nextRequest(t)
+				if delay < 0 || delay >= backoffLimit(attempt) {
+					t.Fatalf("backoff after R-frame flood = %v, want [0, %v)", delay, backoffLimit(attempt))
+				}
+				clock.Advance(delay)
+			}
+		}
+
+		delay := clock.nextRequest(t)
+		if delay < 0 || delay >= backoffLimit(2) {
+			t.Fatalf("backoff after R-frame flood dial failure = %v, want [0, %v)", delay, backoffLimit(2))
+		}
+		if !bytes.Contains(logBuf.Bytes(), []byte("attempt=2")) {
+			t.Fatalf("R-frame flood did not advance attempt: %q", logBuf.String())
+		}
+		cancel()
+	})
+
+	t.Run("stable reconnect frames redial without backoff", func(t *testing.T) {
+		server := newWebSocketTestServer(t)
+		clock := newFakeClock()
+		engine := testEngine(server.url(), clock)
+		cancel, _ := runTestEngine(t, engine)
+
+		for range maxConsecutiveRReconnects * 2 {
+			conn := server.nextConnection(t)
+			if duration := clock.nextRequest(t); duration != livenessTimeout {
+				t.Fatalf("liveness timer duration = %v, want %v", duration, livenessTimeout)
+			}
+			for range 5 {
+				clock.Advance(59 * time.Second)
+				conn.sendFrame(t, '#')
+				if duration := clock.nextRequest(t); duration != livenessTimeout {
+					t.Fatalf("reset liveness timer duration = %v, want %v", duration, livenessTimeout)
+				}
+			}
+			clock.Advance(5 * time.Second)
+			conn.sendFrame(t, 'R')
+			if duration := clock.nextRequest(t); duration != livenessTimeout {
+				t.Fatalf("reset liveness timer duration = %v, want %v", duration, livenessTimeout)
+			}
+		}
+
+		server.nextConnection(t)
+		if duration := clock.nextRequest(t); duration != livenessTimeout {
+			t.Fatalf("liveness timer duration after stable R frame = %v, want %v", duration, livenessTimeout)
+		}
+		cancel()
+	})
+
 	t.Run("permanent frame stops reconnecting", func(t *testing.T) {
 		server := newWebSocketTestServer(t)
 		engine := testEngine(server.url(), newFakeClock())
@@ -191,6 +267,8 @@ func TestWebSocketEngine(t *testing.T) {
 		var logBuf bytes.Buffer
 		engine := testEngine(server.url(), clock)
 		engine.Logger = slog.New(slog.NewTextHandler(&logBuf, nil))
+		var syncCalls atomic.Int32
+		engine.OnSync = func() { syncCalls.Add(1) }
 		engine.Dialer = func(ctx context.Context, url string) (*websocket.Conn, *http.Response, error) {
 			dial := dialCount.Add(1)
 			dials <- dial
@@ -208,6 +286,9 @@ func TestWebSocketEngine(t *testing.T) {
 			server.nextConnection(t)
 			if duration := clock.nextRequest(t); duration != livenessTimeout {
 				t.Fatalf("liveness timer duration = %v, want %v", duration, livenessTimeout)
+			}
+			if got := syncCalls.Load(); got != int32(attempt+1) {
+				t.Fatalf("sync calls after connection %d = %d, want %d", attempt+1, got, attempt+1)
 			}
 			clock.Advance(livenessTimeout)
 			delay := clock.nextRequest(t)
