@@ -19,6 +19,7 @@ import (
 
 	"github.com/vshuraeff/pushover/internal/api"
 	"github.com/vshuraeff/pushover/internal/config"
+	"github.com/vshuraeff/pushover/internal/crypto"
 	"github.com/vshuraeff/pushover/internal/notify"
 	"github.com/vshuraeff/pushover/internal/openclient"
 )
@@ -98,6 +99,74 @@ func TestSyncerSortsDeduplicatesAndPersistsBeforeUpdate(t *testing.T) {
 	}
 	if text := logs.String(); !strings.Contains(text, "sync complete") || !strings.Contains(text, "batch_size=3") || !strings.Contains(text, "notified=2") {
 		t.Fatalf("sync log = %q", text)
+	}
+}
+
+func TestSyncerDecryptsMessageFields(t *testing.T) {
+	key := bytes.Repeat([]byte{0x42}, 32)
+	encryptedTitle, err := crypto.EncryptField("encrypted title", key)
+	if err != nil {
+		t.Fatalf("EncryptField(title) error = %v", err)
+	}
+	encryptedBody, err := crypto.EncryptField("encrypted body", key)
+	if err != nil {
+		t.Fatalf("EncryptField(body) error = %v", err)
+	}
+	encryptedURL, err := crypto.EncryptField("https://example.invalid/details", key)
+	if err != nil {
+		t.Fatalf("EncryptField(url) error = %v", err)
+	}
+	encryptedURLTitle, err := crypto.EncryptField("view details", key)
+	if err != nil {
+		t.Fatalf("EncryptField(url title) error = %v", err)
+	}
+
+	store := &memoryStore{state: &config.State{}}
+	notifier := &recordingNotifier{}
+	syncer := newSyncer(syncerConfig{
+		ctx:           context.Background(),
+		store:         store,
+		state:         store.state,
+		notifier:      notifier,
+		logger:        testLogger(),
+		encryptionKey: key,
+		fetch: func(context.Context, *api.Client, string, string) ([]openclient.Message, error) {
+			return []openclient.Message{{ID: 1, IDStr: "1", Title: encryptedTitle, Message: encryptedBody, URL: encryptedURL, URLTitle: encryptedURLTitle}}, nil
+		},
+		updateHighest: func(context.Context, string, string, int64) error { return nil },
+	})
+
+	if err := syncer.runOnce(context.Background()); err != nil {
+		t.Fatalf("runOnce() error = %v", err)
+	}
+	notification := notifier.Last()
+	if notification.Title != "encrypted title" || notification.Body != "encrypted body" || notification.URL != "https://example.invalid/details" || notification.URLTitle != "view details" {
+		t.Fatalf("notification fields = title %q body %q url %q url title %q", notification.Title, notification.Body, notification.URL, notification.URLTitle)
+	}
+}
+
+func TestSyncerPreservesPlainMessageFieldsWithEncryptionKey(t *testing.T) {
+	store := &memoryStore{state: &config.State{}}
+	notifier := &recordingNotifier{}
+	syncer := newSyncer(syncerConfig{
+		ctx:           context.Background(),
+		store:         store,
+		state:         store.state,
+		notifier:      notifier,
+		logger:        testLogger(),
+		encryptionKey: bytes.Repeat([]byte{0x42}, 32),
+		fetch: func(context.Context, *api.Client, string, string) ([]openclient.Message, error) {
+			return []openclient.Message{{ID: 1, IDStr: "1", Title: "plain title", Message: "plain body", URL: "https://example.invalid/details", URLTitle: "plain URL title"}}, nil
+		},
+		updateHighest: func(context.Context, string, string, int64) error { return nil },
+	})
+
+	if err := syncer.runOnce(context.Background()); err != nil {
+		t.Fatalf("runOnce() error = %v", err)
+	}
+	notification := notifier.Last()
+	if notification.Title != "plain title" || notification.Body != "plain body" || notification.URL != "https://example.invalid/details" || notification.URLTitle != "plain URL title" {
+		t.Fatalf("notification fields = title %q body %q url %q url title %q", notification.Title, notification.Body, notification.URL, notification.URLTitle)
 	}
 }
 

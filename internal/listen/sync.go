@@ -13,6 +13,7 @@ import (
 
 	"github.com/vshuraeff/pushover/internal/api"
 	"github.com/vshuraeff/pushover/internal/config"
+	"github.com/vshuraeff/pushover/internal/crypto"
 	"github.com/vshuraeff/pushover/internal/notify"
 	"github.com/vshuraeff/pushover/internal/openclient"
 )
@@ -38,6 +39,7 @@ type syncerConfig struct {
 	emergencies   *EmergencyScheduler
 	secret        string
 	deviceID      string
+	encryptionKey []byte
 	fetch         fetchMessagesFunc
 	updateHighest updateHighestFunc
 }
@@ -55,6 +57,7 @@ type syncer struct {
 	emergencies   *EmergencyScheduler
 	secret        string
 	deviceID      string
+	encryptionKey []byte
 	fetch         fetchMessagesFunc
 	updateHighest updateHighestFunc
 
@@ -96,6 +99,7 @@ func newSyncer(configuration syncerConfig) *syncer {
 		emergencies:   configuration.emergencies,
 		secret:        configuration.secret,
 		deviceID:      configuration.deviceID,
+		encryptionKey: configuration.encryptionKey,
 		fetch:         configuration.fetch,
 		updateHighest: configuration.updateHighest,
 	}
@@ -299,6 +303,12 @@ func (s *syncer) notification(ctx context.Context, message openclient.Message) n
 		URL:      message.URL,
 		URLTitle: message.URLTitle,
 	}
+	if len(s.encryptionKey) != 0 {
+		notification.Title = s.decryptField(notification.Title)
+		notification.Body = s.decryptField(notification.Body)
+		notification.URL = s.decryptField(notification.URL)
+		notification.URLTitle = s.decryptField(notification.URLTitle)
+	}
 	if message.Priority == 2 && message.Receipt != "" {
 		notification.ThreadID = message.Receipt
 	}
@@ -311,6 +321,18 @@ func (s *syncer) notification(ctx context.Context, message openclient.Message) n
 		notification.SoundName = message.Sound
 	}
 	return notification
+}
+
+func (s *syncer) decryptField(value string) string {
+	if value == "" || len(s.encryptionKey) == 0 {
+		return value
+	}
+	plaintext, err := crypto.DecryptField(value, s.encryptionKey)
+	if err != nil {
+		s.logger.Debug("decrypt message field", "error", err)
+		return value
+	}
+	return plaintext
 }
 
 func (s *syncer) notifyWithRetry(ctx context.Context, notification notify.Notification, iconKey string) error {
