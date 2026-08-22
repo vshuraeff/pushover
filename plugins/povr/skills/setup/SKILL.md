@@ -1,7 +1,7 @@
 ---
 name: setup
 description: Configure the povr Pushover CLI for this machine — app token and user key resolution, the TOML config file used by daemons, and the Open Client session needed to receive messages. Use when povr reports a missing credential, when a povr command fails with "missing app_token credential" or "no session found", or when the user asks to set up, configure, or connect Pushover.
-allowed-tools: Bash(povr validate:*), Bash(povr helper install), Bash(povr client login), Bash(povr client register:*), Bash(povr client listen:*)
+allowed-tools: Bash(povr validate:*), Bash(povr helper install), Bash(povr helper status), Bash(povr client login), Bash(povr client register:*), Bash(export PUSHOVER_NOTIFY_BACKEND=*), Bash(povr client listen:*), Bash(povr daemon install), Bash(povr daemon start), Bash(povr daemon stop), Bash(povr daemon restart), Bash(povr daemon status:*)
 ---
 
 # Configure povr
@@ -80,7 +80,7 @@ Receiving is a separate session, unrelated to the app token:
 ```sh
 povr client login                   # interactive: email, password, 2FA code on demand
 povr client register --name laptop  # 1-25 chars, letters, digits, _ and -
-povr client listen                  # foreground daemon
+povr client listen                  # foreground; see the launchd section for a permanent one
 ```
 
 `login` reads the password from the terminal, so it needs a TTY and cannot be driven
@@ -95,8 +95,12 @@ run, point it at the file backend instead — that backend is chosen before any 
 dispatch, so it also works on Linux, where the desktop backends refuse to start:
 
 ```sh
-PUSHOVER_NOTIFY_BACKEND=file:./povr-notifications.jsonl povr client listen
+export PUSHOVER_NOTIFY_BACKEND=file:./povr-notifications.jsonl
+povr client listen
 ```
+
+Both lines belong to one shell invocation; an `export` run on its own does not survive
+into the next command.
 
 See `/povr:read` for reading what arrives.
 
@@ -104,7 +108,35 @@ For the fullest-fidelity macOS notifications (custom icons, sounds, levels), ins
 helper bundle once. Without it, povr falls back to alerter, if installed, or osascript,
 with reduced fidelity. `povr helper install` is macOS-only; it copies the staged bundle
 (from the Homebrew formula's libexec, or a path given via `--from`) and re-signs it
-ad hoc. From a repository checkout you can instead run `./scripts/build-helper.sh`.
+ad hoc. Only the bare command is pre-approved, so the `--from` form asks first. From a
+repository checkout you can instead run `./scripts/build-helper.sh`.
+
+## Permanent delivery on macOS
+
+`povr client listen` in the foreground, or backgrounded from a shell, dies with the
+shell that started it. For delivery that comes back at every login, and after a reboot,
+without being restarted by hand, install the launchd agent instead:
+
+```sh
+povr daemon install    # write ~/Library/LaunchAgents/net.vshuraeff.povr.listen.plist and load it
+povr daemon status     # plist installed, service loaded, pid, last exit code, detail
+povr daemon stop       # unload, leaving the plist in place
+povr daemon start      # load the installed plist again
+povr daemon restart
+```
+
+The plist runs `povr client listen` with `RunAtLoad` and `KeepAlive`, so launchd starts
+it at login and restarts it when it exits. It carries no environment, which has two
+consequences. Nothing it needs may come from an exported variable: `app_token` and
+`user_key` have to be in the TOML config file, and the Open Client session has to be in
+`state.json`, or in the Keychain when `session_store = "keychain"`. And
+`PUSHOVER_NOTIFY_BACKEND` cannot be set for it, so the agent always uses the desktop
+backend. A file-backend run for an agent to read stays a foreground `povr client listen`.
+
+`povr daemon status` reports on the launchd job, not on delivery: `service loaded: true`
+with a non-zero `last exit code` means launchd is restarting a job that keeps failing.
+The whole family is macOS-only; elsewhere it fails with
+`launchagent: not implemented on this platform`.
 
 ## Failure modes
 
@@ -113,10 +145,11 @@ ad hoc. From a repository checkout you can instead run `./scripts/build-helper.s
   variable, or add the key to the config file.
 - `environment variable "X" for app_token is unset or empty` — a `--*-env` flag named
   `X` and it is not exported. That path never falls back; export it or drop the flag.
-- `no session found: run 'povr client login' and 'povr client register' first` — the
+- ``no session found: run `povr client login` and `povr client register` first`` — the
   receive half is unconfigured, or `register` was skipped after `login`.
 - `notify: helper binary not found in bundle` — `PUSHOVER_NOTIFY_BACKEND=helper` was
-  requested but `Povr.app` is not installed. Install it, or use
+  requested but `Povr.app` is not installed. `povr helper status` prints whether the
+  bundle is installed, its path, and whether its signature is valid. Install it, or use
   `PUSHOVER_NOTIFY_BACKEND=file:<path>`.
 - `notify: backend "helper" is only available on darwin` — Linux. Use the file backend.
 - Password prompt fails with an ioctl error — no TTY. Hand `povr client login` to the

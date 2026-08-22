@@ -1,7 +1,7 @@
 ---
 name: read
 description: Read incoming Pushover messages with the povr CLI — fetch the queued backlog as JSON, acknowledge emergency alerts, or run the listen daemon writing notifications to a JSONL file an agent can tail. Use when the user asks what Pushover messages arrived, to check or acknowledge an emergency alert, or to watch for incoming notifications.
-allowed-tools: Bash(povr client fetch), Bash(povr client fetch:*), Bash(povr client ack:*), Bash(povr client listen:*), Bash(povr client register:*)
+allowed-tools: Bash(povr client fetch:*), Bash(povr client ack:*), Bash(export PUSHOVER_NOTIFY_BACKEND=*), Bash(povr client listen:*), Bash(povr client register:*)
 ---
 
 # Read incoming Pushover messages
@@ -38,11 +38,19 @@ instead of desktop notifications; that backend is selected before any platform c
 it is also the only one that runs on Linux:
 
 ```sh
-PUSHOVER_NOTIFY_BACKEND=file:./povr-notifications.jsonl povr client listen
+export PUSHOVER_NOTIFY_BACKEND=file:./povr-notifications.jsonl
+povr client listen
 ```
 
+Both lines belong to one shell invocation; an `export` run on its own does not survive
+into the next command.
+
 The daemon runs in the foreground until it is stopped — start it in the background and
-read the file separately, never as a blocking foreground call. Each line is one JSON
+read the file separately, never as a blocking foreground call. The launchd agent that
+`/povr:setup` installs is not an alternative here: it carries no environment, so it
+cannot be pointed at the file backend.
+
+Each line of the file is one JSON
 object: `id`, `title`, `body`, `appName`, `priority`, `url`, `urlTitle`, `threadID`,
 `iconPath`, `attachmentPath`, `soundName`, `soundPath`, `level`
 (`passive`, `active` or `timeSensitive`) and `soundSuppressed`. The file is appended to
@@ -68,7 +76,7 @@ Code, `! povr client login` — then run `register` yourself if no device exists
 
 ## Failure modes
 
-- `no session found: run 'povr client login' and 'povr client register' first` —
+- ``no session found: run `povr client login` and `povr client register` first`` —
   no session, or `register` was never run. `fetch` and `listen` both need the device id,
   so `login` alone is not enough.
 - The password prompt fails with an ioctl error — no TTY. Hand `povr client login` to
