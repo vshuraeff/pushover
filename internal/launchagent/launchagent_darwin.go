@@ -6,10 +6,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 const plistFilename = Label + ".plist"
@@ -34,10 +37,19 @@ func Install(opts InstallOptions) error {
 	if err := writePlist(plistPath, executable); err != nil {
 		return err
 	}
-	if _, err := execCommand(context.Background(), "launchctl", "bootstrap", guiDomain(), plistPath); err != nil {
-		return fmt.Errorf("launchagent: bootstrap %q: %w", plistPath, err)
+	bootoutErr := bootout()
+	if isServiceNotLoaded(bootoutErr) {
+		bootoutErr = nil
+	} else if bootoutErr != nil {
+		bootoutErr = launchctlError("bootout", domainLabel(), bootoutErr)
 	}
-	return nil
+	if err := bootstrap(plistPath); err != nil {
+		if bootoutErr != nil {
+			return fmt.Errorf("%v; %w", bootoutErr, err)
+		}
+		return err
+	}
+	return bootoutErr
 }
 
 func Uninstall(opts UninstallOptions) error {
@@ -45,24 +57,154 @@ func Uninstall(opts UninstallOptions) error {
 	if err != nil {
 		return err
 	}
-	_, statErr := os.Lstat(plistPath)
-	if statErr != nil && !os.IsNotExist(statErr) {
-		return fmt.Errorf("launchagent: inspect plist %q: %w", plistPath, statErr)
+	if _, err := os.Lstat(plistPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("launchagent: inspect plist %q: %w", plistPath, err)
 	}
-	wasAbsent := os.IsNotExist(statErr)
 
-	_, bootoutErr := execCommand(context.Background(), "launchctl", "bootout", guiDomain()+"/"+Label)
+	bootoutErr := bootout()
 	if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("launchagent: remove plist %q: %w", plistPath, err)
 	}
-	if wasAbsent {
-		// a missing service makes bootout fail; preserve idempotent uninstall.
+	if isServiceNotLoaded(bootoutErr) {
 		return nil
 	}
 	if bootoutErr != nil {
-		return fmt.Errorf("launchagent: bootout %q: %w", Label, bootoutErr)
+		return launchctlError("bootout", domainLabel(), bootoutErr)
 	}
 	return nil
+}
+
+func Start(opts StartOptions) error {
+	plistPath, err := launchAgentPath(opts.Dest)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Lstat(plistPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("launchagent: no plist installed at %q; run 'povr daemon install' first", plistPath)
+		}
+		return fmt.Errorf("launchagent: inspect plist %q: %w", plistPath, err)
+	}
+	loaded, _ := serviceStatus()
+	if loaded {
+		return nil
+	}
+	return bootstrap(plistPath)
+}
+
+func Stop(opts StopOptions) error {
+	if _, err := launchAgentPath(opts.Dest); err != nil {
+		return err
+	}
+	if err := bootout(); err != nil {
+		if isServiceNotLoaded(err) {
+			return nil
+		}
+		return launchctlError("bootout", domainLabel(), err)
+	}
+	return nil
+}
+
+func Restart(opts RestartOptions) error {
+	loaded, _ := serviceStatus()
+	if !loaded {
+		return Start(StartOptions{Dest: opts.Dest})
+	}
+	if _, err := execCommand(context.Background(), "launchctl", "kickstart", "-k", domainLabel()); err != nil {
+		return launchctlError("kickstart", domainLabel(), err)
+	}
+	return nil
+}
+
+func Status(opts StatusOptions) (StatusResult, error) {
+	plistPath, err := launchAgentPath(opts.Dest)
+	if err != nil {
+		return StatusResult{}, err
+	}
+	result := StatusResult{}
+	if _, err := os.Lstat(plistPath); err != nil {
+		if !os.IsNotExist(err) {
+			return StatusResult{}, fmt.Errorf("launchagent: inspect plist %q: %w", plistPath, err)
+		}
+	} else {
+		result.PlistInstalled = true
+	}
+
+	loaded, output := serviceStatus()
+	if !loaded {
+		result.Detail = launchctlError("print", domainLabel(), output.err).Error()
+		return result, nil
+	}
+	result.Loaded = true
+	result.Detail = "service is loaded"
+	parseStatusOutput(&result, output.stdout)
+	return result, nil
+}
+
+type serviceStatusResult struct {
+	stdout []byte
+	err    error
+}
+
+func serviceStatus() (bool, serviceStatusResult) {
+	stdout, err := execCommand(context.Background(), "launchctl", "print", domainLabel())
+	return err == nil, serviceStatusResult{stdout: stdout, err: err}
+}
+
+func parseStatusOutput(result *StatusResult, output []byte) {
+	for _, line := range strings.Split(string(output), "\n") {
+		separator := strings.Index(line, "=")
+		if separator < 0 {
+			continue
+		}
+		key, value := line[:separator], line[separator+1:]
+		parsed, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil {
+			continue
+		}
+		switch strings.TrimSpace(key) {
+		case "pid":
+			result.PID = parsed
+		case "last exit code":
+			result.LastExitCode = parsed
+			result.HasLastExitCode = true
+		}
+	}
+}
+
+func bootstrap(plistPath string) error {
+	if _, err := execCommand(context.Background(), "launchctl", "bootstrap", guiDomain(), plistPath); err != nil {
+		return launchctlError("bootstrap", plistPath, err)
+	}
+	return nil
+}
+
+func bootout() error {
+	_, err := execCommand(context.Background(), "launchctl", "bootout", domainLabel())
+	return err
+}
+
+func isServiceNotLoaded(err error) bool {
+	var exitError *exec.ExitError
+	if !errors.As(err, &exitError) {
+		return false
+	}
+	// launchctl reports an unloaded service as ESRCH (exit code 3).
+	return exitError.ExitCode() == 3
+}
+
+func domainLabel() string {
+	return guiDomain() + "/" + Label
+}
+
+func launchctlError(action, target string, err error) error {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if stderr := strings.TrimSpace(string(exitErr.Stderr)); stderr != "" {
+			return fmt.Errorf("launchagent: %s %q: %s: %w (inspect with: launchctl print %s; or: log show --predicate 'eventMessage contains %q' --last 5m)", action, target, stderr, err, domainLabel(), Label)
+		}
+	}
+	return fmt.Errorf("launchagent: %s %q: %w (inspect with: launchctl print %s; or: log show --predicate 'eventMessage contains %q' --last 5m)", action, target, err, domainLabel(), Label)
 }
 
 func executablePath(path string) (string, error) {
@@ -112,9 +254,32 @@ func writePlist(path, executable string) error {
 	if err := encoder.Flush(); err != nil {
 		return fmt.Errorf("launchagent: flush plist: %w", err)
 	}
-	if err := os.WriteFile(path, contents.Bytes(), 0o644); err != nil {
-		return fmt.Errorf("launchagent: write plist %q: %w", path, err)
+	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return fmt.Errorf("launchagent: create temporary plist %q: %w", path, err)
 	}
+	tempPath := temp.Name()
+	renamed := false
+	defer func() {
+		if !renamed {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if _, err := temp.Write(contents.Bytes()); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("launchagent: write temporary plist %q: %w", tempPath, err)
+	}
+	if err := temp.Chmod(0o644); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("launchagent: set plist permissions %q: %w", tempPath, err)
+	}
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("launchagent: close temporary plist %q: %w", tempPath, err)
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return fmt.Errorf("launchagent: replace plist %q: %w", path, err)
+	}
+	renamed = true
 	return nil
 }
 

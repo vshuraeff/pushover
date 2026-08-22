@@ -246,6 +246,26 @@ povr subscription migrate --subscription sXXXXXXXXXXXXXXXXXXXXXXXXXXXXX \
   --user u0000000000000000000000000000 --device-name laptop --sound cosmic
 ```
 
+### Daemon
+
+Manage the launchd agent that runs `povr client listen`.
+
+```sh
+povr daemon install
+povr daemon uninstall
+povr daemon start
+povr daemon stop
+povr daemon restart
+povr daemon status --json
+```
+
+`install` installs and loads the launchd agent for `client listen`.
+`uninstall` unloads and removes the launchd agent.
+`start` loads the installed launchd agent.
+`stop` unloads the launchd agent.
+`restart` restarts the launchd agent.
+`status` shows launchd agent status and supports `--json`.
+
 ### Version
 
 ```sh
