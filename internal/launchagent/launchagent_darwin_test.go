@@ -71,6 +71,39 @@ func TestInstallWritesPlistAndBootstrapsAgent(t *testing.T) {
 	}
 }
 
+func TestInstallKeepsSelfDiscoveredExecutableSymlink(t *testing.T) {
+	dest := t.TempDir()
+	realExecutable := filepath.Join(dest, "Cellar", "povr", "0.2.1", "bin", "povr")
+	if err := os.MkdirAll(filepath.Dir(realExecutable), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(realExecutable, []byte("povr"), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	stableExecutable := filepath.Join(dest, "bin", "povr")
+	if err := os.MkdirAll(filepath.Dir(stableExecutable), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.Symlink(realExecutable, stableExecutable); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	swapOSExecutable(t, stableExecutable)
+	swapExecCommand(t, nil)
+	if err := Install(InstallOptions{Dest: dest}); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	contents, err := os.ReadFile(filepath.Join(dest, plistFilename))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	arguments := decodePlistValues(t, contents)["ProgramArguments"]
+	if got, want := elementTexts(arguments.Elements), []string{stableExecutable, "client", "listen"}; !equalStrings(got, want) {
+		t.Errorf("ProgramArguments = %q, want %q", got, want)
+	}
+}
+
 func TestInstallIgnoresUnloadedService(t *testing.T) {
 	dest := t.TempDir()
 	executable := testExecutable(t, dest)
@@ -92,7 +125,7 @@ func TestInstallIgnoresUnloadedService(t *testing.T) {
 	}
 }
 
-func TestInstallContinuesAfterBootoutFailure(t *testing.T) {
+func TestInstallSucceedsWhenBootoutFailsButBootstrapSucceeds(t *testing.T) {
 	dest := t.TempDir()
 	executable := testExecutable(t, dest)
 	invocations := swapExecCommandRunner(t, func(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -103,14 +136,83 @@ func TestInstallContinuesAfterBootoutFailure(t *testing.T) {
 	})
 
 	err := Install(InstallOptions{Executable: executable, Dest: dest})
-	if err == nil || !strings.Contains(err.Error(), "bootout") {
-		t.Fatalf("Install() error = %v, want bootout error", err)
+	if err != nil {
+		t.Fatalf("Install() error = %v, want nil", err)
 	}
 	if got, want := *invocations, []commandInvocation{
 		{name: "launchctl", args: []string{"bootout", domainLabel()}},
 		{name: "launchctl", args: []string{"bootstrap", guiDomain(), filepath.Join(dest, plistFilename)}},
 	}; !equalInvocations(got, want) {
 		t.Errorf("launchctl invocations = %#v, want %#v", got, want)
+	}
+}
+
+func TestInstallCombinesBootoutAndBootstrapFailures(t *testing.T) {
+	dest := t.TempDir()
+	executable := testExecutable(t, dest)
+	swapExecCommandRunner(t, func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if args[0] == "bootout" {
+			return nil, errors.New("permission denied")
+		}
+		return nil, errors.New("bootstrap denied")
+	})
+
+	err := Install(InstallOptions{Executable: executable, Dest: dest})
+	if err == nil {
+		t.Fatal("Install() error = nil, want error")
+	}
+	for _, want := range []string{"bootout", "bootstrap"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Install() error = %q, want %q", err, want)
+		}
+	}
+}
+
+func TestInstallRetriesBootstrapAfterAsyncBootout(t *testing.T) {
+	dest := t.TempDir()
+	executable := testExecutable(t, dest)
+	bootstrapCalls := 0
+	invocations := swapExecCommandRunner(t, func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		switch args[0] {
+		case "bootout":
+			return nil, launchctlExitError(t, 36)
+		case "bootstrap":
+			bootstrapCalls++
+			if bootstrapCalls == 1 {
+				return nil, launchctlExitError(t, 5)
+			}
+		}
+		return nil, nil
+	})
+
+	if err := Install(InstallOptions{Executable: executable, Dest: dest}); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if bootstrapCalls <= 1 {
+		t.Errorf("bootstrap calls = %d, want retry", bootstrapCalls)
+	}
+	if got, want := len(*invocations), 3; got != want {
+		t.Errorf("launchctl invocations = %d, want %d", got, want)
+	}
+}
+
+func TestInstallFailsAfterAsyncBootoutBootstrapRetriesExhausted(t *testing.T) {
+	dest := t.TempDir()
+	executable := testExecutable(t, dest)
+	bootstrapCalls := 0
+	swapExecCommandRunner(t, func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if args[0] == "bootout" {
+			return nil, launchctlExitError(t, 36)
+		}
+		bootstrapCalls++
+		return nil, launchctlExitError(t, 5)
+	})
+
+	if err := Install(InstallOptions{Executable: executable, Dest: dest}); err == nil {
+		t.Fatal("Install() error = nil, want error")
+	}
+	if got, want := bootstrapCalls, bootstrapAttempts; got != want {
+		t.Errorf("bootstrap calls = %d, want %d", got, want)
 	}
 }
 
@@ -277,7 +379,7 @@ func TestStatusReportsPlistAndServiceDetails(t *testing.T) {
 
 func TestStatusReportsUnloadedServiceWithoutFailing(t *testing.T) {
 	dest := t.TempDir()
-	invocations := swapExecCommand(t, errors.New("exit status 3"))
+	invocations := swapExecCommand(t, launchctlExitError(t, 113))
 
 	status, err := Status(StatusOptions{Dest: dest})
 	if err != nil {
@@ -293,6 +395,37 @@ func TestStatusReportsUnloadedServiceWithoutFailing(t *testing.T) {
 	}
 	if got, want := *invocations, []commandInvocation{{name: "launchctl", args: []string{"print", domainLabel()}}}; !equalInvocations(got, want) {
 		t.Errorf("launchctl invocations = %#v, want %#v", got, want)
+	}
+}
+
+func TestStatusTreatsESRCHAsUnloadedService(t *testing.T) {
+	dest := t.TempDir()
+	swapExecCommand(t, launchctlExitError(t, 3))
+
+	status, err := Status(StatusOptions{Dest: dest})
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if status.PlistInstalled || status.Loaded {
+		t.Errorf("Status() = %#v", status)
+	}
+}
+
+func TestStatusReturnsErrorWhenLaunchctlPrintFails(t *testing.T) {
+	dest := t.TempDir()
+	swapExecCommand(t, launchctlExitError(t, 1))
+
+	status, err := Status(StatusOptions{Dest: dest})
+	if err == nil {
+		t.Fatal("Status() error = nil, want error")
+	}
+	if status != (StatusResult{}) {
+		t.Errorf("Status() = %#v, want zero value", status)
+	}
+	for _, want := range []string{"print", domainLabel()} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Status() error = %q, want %q", err, want)
+		}
 	}
 }
 
@@ -345,6 +478,17 @@ func swapExecCommand(t *testing.T, result error) *[]commandInvocation {
 	t.Helper()
 	return swapExecCommandRunner(t, func(_ context.Context, _ string, _ ...string) ([]byte, error) {
 		return nil, result
+	})
+}
+
+func swapOSExecutable(t *testing.T, executable string) {
+	t.Helper()
+	originalOSExecutable := osExecutable
+	osExecutable = func() (string, error) {
+		return executable, nil
+	}
+	t.Cleanup(func() {
+		osExecutable = originalOSExecutable
 	})
 }
 
