@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vshuraeff/pushover/internal/config"
+	pushovercrypto "github.com/vshuraeff/pushover/internal/crypto"
 	"github.com/vshuraeff/pushover/internal/listen"
 	"github.com/vshuraeff/pushover/internal/notify"
 )
@@ -33,6 +34,19 @@ func newClientListenCommand() *cobra.Command {
 			if emergencyRealertSeconds < 30 {
 				return fmt.Errorf("--emergency-realert must be at least 30 seconds")
 			}
+			envFlags, err := EnvFlagsFromCommand(cmd)
+			if err != nil {
+				return err
+			}
+			var encryptionKey []byte
+			if encodedKey, keyErr := config.Resolve(config.RoleEncryptionKey, config.RoleAppToken, envFlags); keyErr == nil {
+				encryptionKey, err = pushovercrypto.ParseKey(encodedKey)
+				if err != nil {
+					return fmt.Errorf("parse encryption key: %w", err)
+				}
+			} else if envFlags.EncryptionKeyEnv != "" {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: message decryption disabled: %v\n", keyErr)
+			}
 			store, err := config.NewSessionStore()
 			if err != nil {
 				return fmt.Errorf("create session store: %w", err)
@@ -49,6 +63,7 @@ func newClientListenCommand() *cobra.Command {
 				Logger:           logger,
 				WSURL:            config.WSURL(),
 				EmergencyRealert: time.Duration(emergencyRealertSeconds) * time.Second,
+				EncryptionKey:    encryptionKey,
 			})
 		},
 	}

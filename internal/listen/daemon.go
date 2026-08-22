@@ -28,6 +28,7 @@ type Daemon struct {
 	WSURL            string
 	EmergencyRealert time.Duration
 	Clock            Clock
+	EncryptionKey    []byte
 	IconCacheDir     string
 	SoundCacheDir    string
 	DeadLetterPath   string
@@ -66,6 +67,9 @@ func Run(ctx context.Context, daemon *Daemon) error {
 	}
 
 	iconDir, soundDir := cacheDirectories(daemon, logger)
+	if err := sweepDeliveryStaging(iconDir, logger); err != nil {
+		logger.Warn("sweep icon delivery staging", "path", iconDir, "error", err)
+	}
 	deadLetterPath, err := deadLetterFilePath(daemon.DeadLetterPath)
 	if err != nil {
 		return err
@@ -82,18 +86,19 @@ func Run(ctx context.Context, daemon *Daemon) error {
 	}()
 
 	syncer := newSyncer(syncerConfig{
-		ctx:         runCtx,
-		store:       daemon.Store,
-		state:       state,
-		client:      daemon.APIClient,
-		notifier:    daemon.Notifier,
-		logger:      logger,
-		clock:       clock,
-		cache:       cache,
-		deadLetters: newDeadLetterWriter(deadLetterPath, clock, logger),
-		emergencies: emergencies,
-		secret:      state.Secret,
-		deviceID:    state.DeviceID,
+		ctx:           runCtx,
+		store:         daemon.Store,
+		state:         state,
+		client:        daemon.APIClient,
+		notifier:      daemon.Notifier,
+		logger:        logger,
+		clock:         clock,
+		cache:         cache,
+		deadLetters:   newDeadLetterWriter(deadLetterPath, clock, logger),
+		emergencies:   emergencies,
+		secret:        state.Secret,
+		deviceID:      state.DeviceID,
+		encryptionKey: daemon.EncryptionKey,
 	})
 	var actionDone chan struct{}
 	defer func() {

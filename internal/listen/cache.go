@@ -21,6 +21,8 @@ type cachedSound struct {
 	name string
 }
 
+var osLink = os.Link
+
 type assetCache struct {
 	client        *api.Client
 	iconDir       string
@@ -126,6 +128,28 @@ func (c *assetCache) resolve(ctx context.Context, dir, key, extension, pathPrefi
 	return path
 }
 
+func sweepDeliveryStaging(dir string, logger *slog.Logger) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("list delivery staging: %w", err)
+	}
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), ".delivery-") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		if err := os.RemoveAll(path); err != nil {
+			logger.Warn("remove stale icon delivery staging failed", "path", path, "error", err)
+			continue
+		}
+		logger.Info("removed stale icon delivery staging", "path", path)
+	}
+	return nil
+}
+
 func stageCachedAsset(dir, cachedPath string) (path string, err error) {
 	deliveryDir, err := os.MkdirTemp(dir, ".delivery-")
 	if err != nil {
@@ -140,7 +164,7 @@ func stageCachedAsset(dir, cachedPath string) (path string, err error) {
 		_ = os.Remove(deliveryDir)
 	}()
 
-	if linkErr := os.Link(cachedPath, target); linkErr == nil {
+	if linkErr := osLink(cachedPath, target); linkErr == nil {
 		return target, nil
 	}
 	data, err := os.ReadFile(cachedPath)
