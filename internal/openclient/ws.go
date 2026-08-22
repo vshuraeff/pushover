@@ -17,6 +17,8 @@ const (
 	stabilityThreshold = 5 * time.Minute
 	backoffBase        = time.Second
 	backoffCap         = 2 * time.Minute
+	// maxConsecutiveRReconnects limits reconnects during R-frame floods.
+	maxConsecutiveRReconnects uint = 3
 )
 
 var (
@@ -42,10 +44,13 @@ type Engine struct {
 	URL      string
 	DeviceID string
 	Secret   string
-	OnSync   func()
-	Clock    Clock
-	Logger   *slog.Logger
-	Dialer   func(context.Context, string) (*websocket.Conn, *http.Response, error)
+	// OnSync runs synchronously after a successful login and on every ! sync frame. It
+	// runs before the liveness timer is first armed, so it must not block or perform
+	// slow I/O inline, or it will delay liveness detection and frame processing.
+	OnSync func()
+	Clock  Clock
+	Logger *slog.Logger
+	Dialer func(context.Context, string) (*websocket.Conn, *http.Response, error)
 }
 
 // run connects and processes websocket frames until cancellation or a terminal frame.
@@ -76,6 +81,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 
 	var attempt uint
+	var consecutiveR uint
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -83,6 +89,7 @@ func (e *Engine) Run(ctx context.Context) error {
 
 		conn, _, err := dial(ctx, e.URL)
 		if err != nil {
+			consecutiveR = 0
 			logger.Warn("websocket dial failed", "attempt", attempt, "err", err)
 			if conn != nil {
 				_ = conn.CloseNow()
@@ -105,13 +112,29 @@ func (e *Engine) Run(ctx context.Context) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
+		if outcome != connectionImmediateReconnect {
+			consecutiveR = 0
+		}
 		switch outcome {
 		case connectionPermanent:
 			return ErrPermanent
 		case connectionReplaced:
 			return ErrReplaced
 		case connectionImmediateReconnect:
-			continue
+			if stable {
+				consecutiveR = 0
+				attempt = 0
+				continue
+			}
+			consecutiveR++
+			if consecutiveR < maxConsecutiveRReconnects {
+				continue
+			}
+			if err := waitForBackoff(ctx, clock, attempt); err != nil {
+				return err
+			}
+			attempt = nextAttempt(attempt)
+			consecutiveR = 0
 		case connectionFailed:
 			if stable {
 				attempt = 0
@@ -186,7 +209,7 @@ func (e *Engine) serve(ctx context.Context, conn *websocket.Conn, clock Clock, l
 					e.OnSync()
 				}
 			case 'R':
-				return connectionImmediateReconnect, false
+				return connectionImmediateReconnect, clock.Now().Sub(connectedAt) >= stabilityThreshold
 			case 'E':
 				return connectionPermanent, false
 			case 'A':
