@@ -14,6 +14,8 @@ Two halves:
   acknowledgement) and a `listen` daemon that turns pushed messages into native macOS
   notifications.
 
+![povr native macOS notification](assets/notification-screenshot.png)
+
 ## Requirements
 
 - Go 1.26 or newer to build.
