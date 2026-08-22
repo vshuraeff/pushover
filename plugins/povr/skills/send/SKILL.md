@@ -2,7 +2,7 @@
 name: send
 description: Send a Pushover notification with the povr CLI — plain, high-priority, or emergency messages with acknowledgement receipts, plus sounds, attachments and links. Use when the user asks to notify them, ping their phone, alert someone on Pushover, or be told when a long-running job finishes.
 argument-hint: "[message text]"
-allowed-tools: Bash(povr send:*), Bash(povr sounds), Bash(povr sounds:*), Bash(povr receipt:*), Bash(povr limits), Bash(povr limits:*)
+allowed-tools: Bash(povr send:*), Bash(povr sounds:*), Bash(povr receipt:*), Bash(povr limits:*)
 ---
 
 # Send a Pushover notification
