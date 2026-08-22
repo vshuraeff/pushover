@@ -3,6 +3,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,7 +19,7 @@ const (
 
 var ErrKeychainEntryNotFound = errors.New("keychain session state not found")
 
-type securityRunner func(args ...string) (stdout []byte, err error)
+type securityRunner func(stdin string, args ...string) (stdout []byte, err error)
 
 type KeychainSessionStore struct {
 	run securityRunner
@@ -31,12 +32,15 @@ func NewKeychainSessionStore() (*KeychainSessionStore, error) {
 }
 
 func (s *KeychainSessionStore) Load() (*State, error) {
-	data, err := s.run("find-generic-password", "-a", keychainAccount, "-s", keychainServiceName, "-w")
+	data, err := s.run("", "find-generic-password", "-a", keychainAccount, "-s", keychainServiceName, "-w")
 	if err != nil {
 		if errors.Is(err, ErrKeychainEntryNotFound) || strings.Contains(strings.ToLower(err.Error()), "could not be found") {
 			return nil, fmt.Errorf("%w: %w", ErrKeychainEntryNotFound, os.ErrNotExist)
 		}
 		return nil, fmt.Errorf("find keychain session state: %w", err)
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(string(data)); err == nil {
+		data = decoded
 	}
 
 	var state State
@@ -55,14 +59,20 @@ func (s *KeychainSessionStore) Save(state *State) error {
 	if err != nil {
 		return fmt.Errorf("encode session state: %w", err)
 	}
-	if _, err := s.run("add-generic-password", "-a", keychainAccount, "-s", keychainServiceName, "-w", string(data), "-U"); err != nil {
+
+	// use base64 because security's interactive command quoting is undocumented.
+	script := fmt.Sprintf("add-generic-password -a %s -s %s -w %s -U\n", keychainAccount, keychainServiceName, base64.StdEncoding.EncodeToString(data))
+	if _, err := s.run(script, "-iq"); err != nil {
 		return fmt.Errorf("save keychain session state: %w", err)
 	}
 	return nil
 }
 
-func runSecurity(args ...string) ([]byte, error) {
+func runSecurity(stdin string, args ...string) ([]byte, error) {
 	command := exec.Command("/usr/bin/security", args...)
+	if stdin != "" {
+		command.Stdin = strings.NewReader(stdin)
+	}
 	stdout, err := command.Output()
 	if err == nil {
 		return stdout, nil
