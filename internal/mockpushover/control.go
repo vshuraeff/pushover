@@ -26,6 +26,7 @@ func (s *Server) registerControlRoutes() {
 	s.RegisterControlRoute("POST /_control/seed", http.HandlerFunc(s.handleControlSeed))
 	s.RegisterControlRoute("POST /_control/fault", http.HandlerFunc(s.handleControlFault))
 	s.RegisterControlRoute("GET /_control/requests", http.HandlerFunc(s.handleControlRequests))
+	s.RegisterControlRoute("GET /_control/devices", http.HandlerFunc(s.handleControlDevices))
 	s.RegisterControlRoute("POST /_control/ws/send", http.HandlerFunc(s.handleControlWSSend))
 	s.RegisterControlRoute("POST /_control/ws/close", http.HandlerFunc(s.handleControlWSClose))
 	s.RegisterControlRoute("GET /_control/ws/status", http.HandlerFunc(s.handleControlWSStatus))
@@ -89,6 +90,16 @@ func (s *Server) handleControlRequests(w http.ResponseWriter, _ *http.Request) {
 	}
 	s.store.mu.RUnlock()
 	writeJSON(w, http.StatusOK, requests)
+}
+
+func (s *Server) handleControlDevices(w http.ResponseWriter, _ *http.Request) {
+	s.store.mu.RLock()
+	devices := make([]Device, 0, len(s.store.devices))
+	for _, device := range s.store.devices {
+		devices = append(devices, device)
+	}
+	s.store.mu.RUnlock()
+	writeJSON(w, http.StatusOK, devices)
 }
 
 func (s *Server) handleControlWSSend(w http.ResponseWriter, r *http.Request) {
@@ -156,6 +167,27 @@ func (c *ControlClient) Requests() ([]JournaledRequest, error) {
 		return nil, err
 	}
 	return requests, nil
+}
+
+func (c *ControlClient) Devices() ([]Device, error) {
+	request, err := http.NewRequest(http.MethodGet, c.baseURL+"/_control/devices", nil)
+	if err != nil {
+		return nil, err
+	}
+	response, err := c.client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+		return nil, fmt.Errorf("control devices: status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var devices []Device
+	if err := json.NewDecoder(response.Body).Decode(&devices); err != nil {
+		return nil, err
+	}
+	return devices, nil
 }
 
 func (c *ControlClient) WSSend(frame string) error {

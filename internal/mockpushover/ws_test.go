@@ -108,6 +108,26 @@ func TestWebSocketBinaryLoginIsIgnored(t *testing.T) {
 	}
 }
 
+func TestWebSocketDisabledLoginTimeoutDoesNotCloseConnection(t *testing.T) {
+	const disabled = -time.Second
+	server := startTestServerWithConfig(t, func(cfg *Config) {
+		cfg.LoginTimeout = disabled
+	})
+	if server.loginTimeout != disabled {
+		t.Fatalf("loginTimeout = %v, want %v", server.loginTimeout, disabled)
+	}
+	conn := dialWebSocket(t, server)
+	writeWebSocketBinary(t, conn, "login:"+testDeviceID+":"+testBinding+"\n")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, payload, err := conn.Read(ctx); err == nil {
+		t.Fatalf("Read() payload = %q, want idle connection", payload)
+	} else if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Read() error = %v, want context deadline", err)
+	}
+}
+
 // TestWebSocketSendsProactiveKeepalive verifies that a logged-in session
 // receives '#' keepalive frames on its own, without a control-plane nudge.
 func TestWebSocketSendsProactiveKeepalive(t *testing.T) {
@@ -120,6 +140,91 @@ func TestWebSocketSendsProactiveKeepalive(t *testing.T) {
 
 	requireWebSocketFrame(t, conn, '#')
 	requireWebSocketFrame(t, conn, '#')
+}
+
+func TestWebSocketDisabledKeepaliveDoesNotSendFrames(t *testing.T) {
+	const disabled = -time.Second
+	server := startTestServerWithConfig(t, func(cfg *Config) {
+		cfg.KeepaliveInterval = disabled
+	})
+	if server.keepaliveInterval != disabled {
+		t.Fatalf("keepaliveInterval = %v, want %v", server.keepaliveInterval, disabled)
+	}
+	conn := dialWebSocket(t, server)
+	writeWebSocket(t, conn, "login:"+testDeviceID+":"+testBinding+"\n")
+	waitWebSocketStatus(t, server, func(status WSStatus) bool { return status.Connected })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, payload, err := conn.Read(ctx); err == nil {
+		t.Fatalf("Read() payload = %q, want no keepalive", payload)
+	} else if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Read() error = %v, want context deadline", err)
+	}
+}
+
+func TestWebSocketKeepaliveDoesNotFollowExplicitFrame(t *testing.T) {
+	const iterations = 50
+	server := startTestServerWithConfig(t, func(cfg *Config) {
+		cfg.KeepaliveInterval = time.Hour
+	})
+
+	for range iterations {
+		conn := dialWebSocket(t, server)
+		writeWebSocket(t, conn, "login:"+testDeviceID+":"+testBinding+"\n")
+		waitWebSocketStatus(t, server, func(status WSStatus) bool { return status.Connected })
+
+		server.ws.mu.Lock()
+		stop := server.ws.keepaliveStop
+		server.ws.keepaliveNext = time.Now()
+		server.ws.mu.Unlock()
+
+		start := make(chan struct{})
+		errs := make(chan error, 2)
+		go func() {
+			<-start
+			errs <- server.sendKeepaliveFrame(stop)
+		}()
+		go func() {
+			<-start
+			errs <- server.sendWebSocketFrame('!')
+		}()
+		close(start)
+		for range 2 {
+			if err := <-errs; err != nil {
+				t.Fatalf("frame send error = %v", err)
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		_, payload, err := conn.Read(ctx)
+		cancel()
+		if err != nil {
+			t.Fatalf("Read() error = %v", err)
+		}
+		if len(payload) != 1 {
+			t.Fatalf("frame = %q", payload)
+		}
+		switch payload[0] {
+		case '#':
+			requireWebSocketFrame(t, conn, '!')
+		case '!':
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+			_, payload, err := conn.Read(ctx)
+			cancel()
+			if err == nil {
+				t.Fatalf("frame after explicit send = %q, want none", payload)
+			}
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("Read() error = %v, want context deadline", err)
+			}
+		default:
+			t.Fatalf("frame = %q, want '#' or '!'", payload)
+		}
+
+		server.closeWebSocket()
+		requireWebSocketClosed(t, conn)
+	}
 }
 
 func TestControlWebSocketSend(t *testing.T) {

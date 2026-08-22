@@ -90,6 +90,23 @@ func TestClientRegisterAfterPTYLoginStoresDevice(t *testing.T) {
 	if state.DeviceName != deviceName {
 		t.Fatalf("registration state device name = %q, want %q", state.DeviceName, deviceName)
 	}
+	devices, err := h.control.Devices()
+	if err != nil {
+		t.Fatalf("list registered devices: %v", err)
+	}
+	found := false
+	for _, device := range devices {
+		if device.ID == state.DeviceID {
+			found = true
+			if device.Name != deviceName {
+				t.Fatalf("registered device name = %q, want %q", device.Name, deviceName)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("registered device id %q was not returned by the mock server", state.DeviceID)
+	}
 
 	requests := h.requests(t)
 	if len(requests) != 2 {

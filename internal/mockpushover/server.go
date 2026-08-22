@@ -25,11 +25,13 @@ type Config struct {
 	ErrorShape   ErrorShape
 	// LoginTimeout bounds how long an unauthenticated websocket connection
 	// (or one that logged in over the wrong frame type) is kept open before
-	// the server closes it. Defaults to defaultLoginTimeout when zero.
+	// the server closes it. The real Pushover server uses about 60s; the mock
+	// default is the shorter defaultLoginTimeout (3s) for fast tests. Zero uses
+	// the default, and a negative value disables the timeout.
 	LoginTimeout time.Duration
 	// KeepaliveInterval controls how often a logged-in websocket session
-	// receives a proactive '#' keepalive frame. Defaults to
-	// defaultKeepaliveInterval when zero.
+	// receives a proactive '#' keepalive frame. Zero uses
+	// defaultKeepaliveInterval, and a negative value disables keepalives.
 	KeepaliveInterval time.Duration
 }
 
@@ -72,11 +74,11 @@ func Start(cfg Config) (*Server, error) {
 	}
 
 	loginTimeout := cfg.LoginTimeout
-	if loginTimeout <= 0 {
+	if loginTimeout == 0 {
 		loginTimeout = defaultLoginTimeout
 	}
 	keepaliveInterval := cfg.KeepaliveInterval
-	if keepaliveInterval <= 0 {
+	if keepaliveInterval == 0 {
 		keepaliveInterval = defaultKeepaliveInterval
 	}
 

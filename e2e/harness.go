@@ -46,6 +46,8 @@ type harness struct {
 	control          *mockpushover.ControlClient
 	env              []string
 	configDir        string
+	homeDir          string
+	cacheDir         string
 	notificationPath string
 }
 
@@ -142,8 +144,17 @@ func newHarness(t *testing.T, seed mockpushover.SeedState) *harness {
 	})
 	return &harness{
 		server: server, control: server.Control(), env: env,
-		configDir: configDir, notificationPath: notificationPath,
+		configDir: configDir, homeDir: homeDir, cacheDir: cacheDir,
+		notificationPath: notificationPath,
 	}
+}
+
+func (h *harness) iconCachePath(key string) string {
+	cacheDir := h.cacheDir
+	if runtime.GOOS == "darwin" {
+		cacheDir = filepath.Join(h.homeDir, "Library", "Caches")
+	}
+	return filepath.Join(cacheDir, "povr", "icons", key+".png")
 }
 
 func mergeEnv(base []string, overrides map[string]string) []string {
@@ -291,10 +302,10 @@ func runViaPTY(t *testing.T, env []string, args, stdinLines []string) commandRes
 	t.Helper()
 	const scriptPath = "/usr/bin/script"
 	if runtime.GOOS != "darwin" {
-		t.Skip("BSD-style /usr/bin/script PTY invocation is only supported on macOS (darwin)")
+		t.Skip("skipping Open Client login/register/listen chain e2e coverage: BSD /usr/bin/script PTY invocation is macOS-only")
 	}
 	if info, err := os.Stat(scriptPath); err != nil || info.IsDir() {
-		t.Skip("/usr/bin/script is required for interactive login e2e tests")
+		t.Skip("skipping Open Client login/register/listen chain e2e coverage: BSD /usr/bin/script is unavailable on this macOS runner")
 	}
 	prompts := []string{"Email: ", "Password: "}
 	if len(stdinLines) == 3 {
@@ -437,17 +448,22 @@ type backgroundProcess struct {
 	done   chan struct{}
 	mu     sync.Mutex
 	err    error
-	stdout bytes.Buffer
-	stderr bytes.Buffer
+	stdout *promptBuffer
+	stderr *promptBuffer
 }
 
 func (h *harness) start(t *testing.T, args ...string) *backgroundProcess {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	process := &backgroundProcess{cancel: cancel, done: make(chan struct{})}
+	process := &backgroundProcess{
+		cancel: cancel,
+		done:   make(chan struct{}),
+		stdout: newPromptBuffer(),
+		stderr: newPromptBuffer(),
+	}
 	process.cmd = processCommand(ctx, h.env, binaryPath, args...)
-	process.cmd.Stdout = &process.stdout
-	process.cmd.Stderr = &process.stderr
+	process.cmd.Stdout = process.stdout
+	process.cmd.Stderr = process.stderr
 	if err := process.cmd.Start(); err != nil {
 		cancel()
 		t.Fatalf("start child command: %v", err)
@@ -501,6 +517,10 @@ func (p *backgroundProcess) wait(t *testing.T, timeout time.Duration) error {
 func (p *backgroundProcess) output() (string, string) {
 	<-p.done
 	return p.stdout.String(), p.stderr.String()
+}
+
+func (p *backgroundProcess) Stderr() string {
+	return p.stderr.String()
 }
 
 func describeWSStatus(status mockpushover.WSStatus, err error) string {
