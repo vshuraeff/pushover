@@ -86,8 +86,9 @@ povr client listen                  # foreground daemon
 `login` reads the password from the terminal, so it needs a TTY and cannot be driven
 from a normal tool call. Ask the user to run it themselves — in Claude Code,
 `! povr client login`. There is no flag to pass the email or password. Only the session
-secret returned by the server is stored, in `~/.config/pushover/state.json`; the
-password is not. `register` must run after `login` and before `fetch` or `listen`.
+secret returned by the server is stored — in `~/.config/pushover/state.json`, or in the
+macOS Keychain when `session_store = "keychain"` (see above); the password is not.
+`register` must run after `login` and before `fetch` or `listen`.
 
 `listen` posts native macOS notifications by default. For a headless or agent-readable
 run, point it at the file backend instead — that backend is chosen before any platform
