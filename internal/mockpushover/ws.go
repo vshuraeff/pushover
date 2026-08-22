@@ -29,6 +29,7 @@ type webSocketState struct {
 	loginOK       bool
 	connectCount  int
 	keepaliveStop chan struct{}
+	keepaliveNext time.Time
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -72,12 +73,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) waitForLoginTimeout(ctx context.Context) {
+	if s.loginTimeout < 0 {
+		<-ctx.Done()
+		return
+	}
 	timer := time.NewTimer(s.loginTimeout)
 	defer timer.Stop()
-	select {
-	case <-timer.C:
-	case <-ctx.Done():
-	}
+	<-timer.C
 }
 
 func parseWebSocketLogin(payload []byte) (string, string, bool) {
@@ -112,6 +114,7 @@ func (s *Server) registerWebSocket(conn *websocket.Conn, deviceID string) {
 	s.ws.loginOK = true
 	s.ws.connectCount++
 	s.ws.keepaliveStop = stop
+	s.ws.keepaliveNext = time.Now().Add(s.keepaliveInterval)
 	s.ws.mu.Unlock()
 	go s.runKeepalive(stop)
 }
@@ -130,7 +133,7 @@ func (s *Server) runKeepalive(stop chan struct{}) {
 		case <-stop:
 			return
 		case <-ticker.C:
-			if err := s.sendWebSocketFrame('#'); err != nil {
+			if err := s.sendKeepaliveFrame(stop); err != nil {
 				return
 			}
 		}
@@ -144,6 +147,7 @@ func (s *Server) stopKeepaliveLocked() {
 		close(s.ws.keepaliveStop)
 		s.ws.keepaliveStop = nil
 	}
+	s.ws.keepaliveNext = time.Time{}
 }
 
 func (s *Server) disconnectWebSocket(conn *websocket.Conn) {
@@ -168,6 +172,26 @@ func (s *Server) sendWebSocketFrame(frame byte) error {
 		s.stopKeepaliveLocked()
 		return errNoWebSocketClient
 	}
+	s.ws.keepaliveNext = time.Now().Add(s.keepaliveInterval)
+	return nil
+}
+
+func (s *Server) sendKeepaliveFrame(stop chan struct{}) error {
+	s.ws.mu.Lock()
+	defer s.ws.mu.Unlock()
+	if s.ws.keepaliveStop != stop || s.ws.conn == nil {
+		return errNoWebSocketClient
+	}
+	if time.Now().Before(s.ws.keepaliveNext) {
+		return nil
+	}
+	if err := writeWebSocketFrame(s.ws.conn, '#'); err != nil {
+		_ = s.ws.conn.CloseNow()
+		s.ws.conn = nil
+		s.stopKeepaliveLocked()
+		return errNoWebSocketClient
+	}
+	s.ws.keepaliveNext = time.Now().Add(s.keepaliveInterval)
 	return nil
 }
 

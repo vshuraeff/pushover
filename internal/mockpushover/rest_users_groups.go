@@ -110,6 +110,8 @@ func (s *Server) handleCreateDevice(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	deviceID := randomKey(40)
+	// the new device's secret matches the session secret used to register it.
+	// e2e/listen_test.go's login/register/listen chain depends on this re-seed invariant.
 	s.store.devices[deviceID] = Device{
 		ID: deviceID, User: userKey, Name: name, OS: "O", Secret: secret, Enabled: true,
 	}

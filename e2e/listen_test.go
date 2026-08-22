@@ -3,7 +3,10 @@
 package e2e
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,6 +82,25 @@ func TestClientListenSyncsAndHandlesReconnectAndTerminalFrames(t *testing.T) {
 	}
 	if _, err := os.Stat(notification.IconPath); !os.IsNotExist(err) {
 		t.Fatalf("delivered notification icon still exists: %v", err)
+	}
+	response, err := http.Get(h.server.URL() + "/icons/fixture-icon.png")
+	if err != nil {
+		t.Fatalf("fetch fixture icon: %v", err)
+	}
+	defer response.Body.Close()
+	fixtureIcon, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read fixture icon: %v", err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("fixture icon status = %d, want %d", response.StatusCode, http.StatusOK)
+	}
+	cachedIcon, err := os.ReadFile(h.iconCachePath("fixture-icon"))
+	if err != nil {
+		t.Fatalf("read durable icon cache: %v", err)
+	}
+	if !bytes.Equal(cachedIcon, fixtureIcon) {
+		t.Fatal("durable icon cache did not match the fixture icon")
 	}
 
 	status, err := h.control.WSStatus()
@@ -163,6 +185,13 @@ func TestClientListenSyncsQueuedMessageAfterReconnectWithoutSyncFrame(t *testing
 		t.Fatalf("read websocket status before forced close: %v", err)
 	}
 	beforeClose := status.ConnectCount
+	data, err := os.ReadFile(h.notificationPath)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read notification file before forced close: %v", err)
+	}
+	if len(strings.TrimSpace(string(data))) != 0 {
+		t.Fatal("queued message was delivered before the forced close; reconnect sync path was not exercised")
+	}
 	if err := h.control.WSClose(); err != nil {
 		t.Fatalf("force websocket close: %v", err)
 	}
@@ -284,13 +313,15 @@ func TestClientListenAfterLoginAndRegistrationSyncsMessage(t *testing.T) {
 		t.Fatalf("registration state device name = %q, want %q", state.DeviceName, deviceName)
 	}
 
-	h.start(t, "client", "listen")
+	process := h.start(t, "client", "listen")
 	eventually(t, 5*time.Second, 20*time.Millisecond, func() (bool, string) {
 		status, err := h.control.WSStatus()
-		return err == nil && status.Connected && status.LoginOK && status.LoginDeviceID == state.DeviceID && status.ConnectCount >= 1, describeWSStatus(status, err)
+		return err == nil && status.Connected && status.LoginOK && status.LoginDeviceID == state.DeviceID && status.ConnectCount >= 1,
+			describeWSStatus(status, err) + "; listen stderr: " + process.Stderr()
 	})
 
 	queued := defaultSeed()
+	// the mock preserves the registration session secret on the created device.
 	queued.Devices = append(queued.Devices, mockpushover.Device{
 		ID: state.DeviceID, User: fixtureUserKey, Name: state.DeviceName, OS: "O", Secret: state.Secret, Enabled: true,
 	})
