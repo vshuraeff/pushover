@@ -22,14 +22,14 @@ const (
 )
 
 func TestWebSocketEngine(t *testing.T) {
-	t.Run("login frame is binary and exact", func(t *testing.T) {
+	t.Run("login frame is text and exact", func(t *testing.T) {
 		server := newWebSocketTestServer(t)
 		engine := testEngine(server.url(), newFakeClock())
 		cancel, _ := runTestEngine(t, engine)
 
 		conn := server.nextConnection(t)
-		if conn.loginType != websocket.MessageBinary {
-			t.Errorf("login message type = %v, want %v", conn.loginType, websocket.MessageBinary)
+		if conn.loginType != websocket.MessageText {
+			t.Errorf("login message type = %v, want %v", conn.loginType, websocket.MessageText)
 		}
 		want := "login:" + testDeviceID + ":" + testSecret + "\n"
 		if string(conn.login) != want {
@@ -41,18 +41,43 @@ func TestWebSocketEngine(t *testing.T) {
 
 	t.Run("sync frame invokes callback", func(t *testing.T) {
 		server := newWebSocketTestServer(t)
-		synced := make(chan struct{}, 1)
+		synced := make(chan struct{}, 2)
 		engine := testEngine(server.url(), newFakeClock())
 		engine.OnSync = func() { synced <- struct{}{} }
 		cancel, _ := runTestEngine(t, engine)
 
 		conn := server.nextConnection(t)
+		waitForSignal(t, synced, "sync after initial connection")
 		conn.sendFrame(t, '!')
-		select {
-		case <-synced:
-		case <-time.After(2 * time.Second):
-			t.Fatal("OnSync was not called")
+		waitForSignal(t, synced, "sync frame")
+		cancel()
+	})
+
+	t.Run("reconnect invokes sync without sync frame", func(t *testing.T) {
+		server := newWebSocketTestServer(t)
+		clock := newFakeClock()
+		initialSync := make(chan struct{})
+		synced := make(chan struct{}, 2)
+		var syncCalls atomic.Int32
+		engine := testEngine(server.url(), clock)
+		engine.OnSync = func() {
+			if syncCalls.Add(1) == 1 {
+				<-initialSync
+				return
+			}
+			synced <- struct{}{}
 		}
+		cancel, _ := runTestEngine(t, engine)
+
+		first := server.nextConnection(t)
+		close(initialSync)
+		if duration := clock.nextRequest(t); duration != livenessTimeout {
+			t.Fatalf("liveness timer duration = %v, want %v", duration, livenessTimeout)
+		}
+		first.sendFrame(t, 'R')
+
+		server.nextConnection(t)
+		waitForSignal(t, synced, "sync after reconnect")
 		cancel()
 	})
 

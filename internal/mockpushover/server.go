@@ -23,17 +23,27 @@ type Config struct {
 	Logger       *log.Logger
 	InitialState *SeedState
 	ErrorShape   ErrorShape
+	// LoginTimeout bounds how long an unauthenticated websocket connection
+	// (or one that logged in over the wrong frame type) is kept open before
+	// the server closes it. Defaults to defaultLoginTimeout when zero.
+	LoginTimeout time.Duration
+	// KeepaliveInterval controls how often a logged-in websocket session
+	// receives a proactive '#' keepalive frame. Defaults to
+	// defaultKeepaliveInterval when zero.
+	KeepaliveInterval time.Duration
 }
 
 type Server struct {
-	url         string
-	listener    net.Listener
-	httpServer  *http.Server
-	client      *http.Client
-	store       *store
-	defaultSeed SeedState
-	controlMux  *http.ServeMux
-	ws          webSocketState
+	url               string
+	listener          net.Listener
+	httpServer        *http.Server
+	client            *http.Client
+	store             *store
+	defaultSeed       SeedState
+	controlMux        *http.ServeMux
+	ws                webSocketState
+	loginTimeout      time.Duration
+	keepaliveInterval time.Duration
 }
 
 func Start(cfg Config) (*Server, error) {
@@ -61,13 +71,24 @@ func Start(cfg Config) (*Server, error) {
 		return nil, err
 	}
 
+	loginTimeout := cfg.LoginTimeout
+	if loginTimeout <= 0 {
+		loginTimeout = defaultLoginTimeout
+	}
+	keepaliveInterval := cfg.KeepaliveInterval
+	if keepaliveInterval <= 0 {
+		keepaliveInterval = defaultKeepaliveInterval
+	}
+
 	s := &Server{
-		url:         "http://" + listener.Addr().String(),
-		listener:    listener,
-		client:      &http.Client{Timeout: 5 * time.Second},
-		store:       newStore(seed),
-		defaultSeed: defaultSeed,
-		controlMux:  http.NewServeMux(),
+		url:               "http://" + listener.Addr().String(),
+		listener:          listener,
+		client:            &http.Client{Timeout: 5 * time.Second},
+		store:             newStore(seed),
+		defaultSeed:       defaultSeed,
+		controlMux:        http.NewServeMux(),
+		loginTimeout:      loginTimeout,
+		keepaliveInterval: keepaliveInterval,
 	}
 	rootMux := http.NewServeMux()
 	apiMux := http.NewServeMux()

@@ -316,6 +316,31 @@ func TestWritePlistRemovesTemporaryFileAfterRenameFailure(t *testing.T) {
 	}
 }
 
+func TestWritePlistUsesSelfClosingBooleanTags(t *testing.T) {
+	path := filepath.Join(t.TempDir(), plistFilename)
+	if err := writePlist(path, "/tmp/povr"); err != nil {
+		t.Fatalf("writePlist() error = %v", err)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if strings.Contains(string(contents), "<true></true>") {
+		t.Error("plist contains paired true tags")
+	}
+	if !strings.Contains(string(contents), "<true/>") {
+		t.Error("plist does not contain self-closing true tag")
+	}
+
+	plutil, err := exec.LookPath("plutil")
+	if err != nil {
+		t.Skip("plutil is not available")
+	}
+	if output, err := exec.Command(plutil, "-lint", path).CombinedOutput(); err != nil {
+		t.Fatalf("plutil -lint error = %v, output = %s", err, output)
+	}
+}
+
 func swapExecCommand(t *testing.T, result error) *[]commandInvocation {
 	t.Helper()
 	return swapExecCommandRunner(t, func(_ context.Context, _ string, _ ...string) ([]byte, error) {

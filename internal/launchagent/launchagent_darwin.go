@@ -254,6 +254,8 @@ func writePlist(path, executable string) error {
 	if err := encoder.Flush(); err != nil {
 		return fmt.Errorf("launchagent: flush plist: %w", err)
 	}
+	encoded := bytes.ReplaceAll(contents.Bytes(), []byte("<true></true>"), []byte("<true/>"))
+	encoded = bytes.ReplaceAll(encoded, []byte("<false></false>"), []byte("<false/>"))
 	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
 	if err != nil {
 		return fmt.Errorf("launchagent: create temporary plist %q: %w", path, err)
@@ -265,7 +267,7 @@ func writePlist(path, executable string) error {
 			_ = os.Remove(tempPath)
 		}
 	}()
-	if _, err := temp.Write(contents.Bytes()); err != nil {
+	if _, err := temp.Write(encoded); err != nil {
 		_ = temp.Close()
 		return fmt.Errorf("launchagent: write temporary plist %q: %w", tempPath, err)
 	}

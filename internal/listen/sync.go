@@ -175,17 +175,32 @@ func (s *syncer) runOnce(ctx context.Context) error {
 		isOpenEmergency := message.Priority == 2 && message.Acked == 0 && message.Receipt != ""
 		if message.ID > initialLast || isOpenEmergency {
 			notification := s.notification(ctx, message)
-			notifications[index] = notification
+			if message.ID > initialLast {
+				notifications[index] = notification
+			}
 			if isOpenEmergency {
+				emergencyNotification := notification
+				emergencyNotification.IconPath = ""
 				openEmergencies[message.Receipt] = emergencyState{
 					messageID:    message.ID,
-					notification: notification,
+					notification: emergencyNotification,
+					iconKey:      message.Icon,
+				}
+				if message.ID <= initialLast && s.cache != nil {
+					s.cache.cleanupIcon(notification.IconPath)
 				}
 			}
 		}
 		if message.Receipt != "" && message.Acked == 1 {
 			delete(openEmergencies, message.Receipt)
 		}
+	}
+	if s.cache != nil {
+		defer func() {
+			for _, notification := range notifications {
+				s.cache.cleanupIcon(notification.IconPath)
+			}
+		}()
 	}
 	if s.emergencies != nil {
 		// fetch is treated as the server's complete current open-emergency view.
@@ -206,7 +221,7 @@ func (s *syncer) runOnce(ctx context.Context) error {
 			notification = s.notification(ctx, message)
 		}
 		processed++
-		if err := s.notifyWithRetry(ctx, notification); err != nil {
+		if err := s.notifyWithRetry(ctx, notification, message.Icon); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -298,20 +313,30 @@ func (s *syncer) notification(ctx context.Context, message openclient.Message) n
 	return notification
 }
 
-func (s *syncer) notifyWithRetry(ctx context.Context, notification notify.Notification) error {
+func (s *syncer) notifyWithRetry(ctx context.Context, notification notify.Notification, iconKey string) error {
+	attemptNotification := notification
+	if s.cache != nil {
+		defer func() {
+			s.cache.cleanupIcon(attemptNotification.IconPath)
+		}()
+	}
 	var lastErr error
 	for attempt := 0; attempt < notifyAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		lastErr = s.notifier.Notify(ctx, notification)
+		if attempt > 0 && s.cache != nil && iconKey != "" {
+			s.cache.cleanupIcon(attemptNotification.IconPath)
+			attemptNotification.IconPath = s.cache.Icon(ctx, iconKey)
+		}
+		lastErr = s.notifier.Notify(ctx, attemptNotification)
 		if lastErr == nil {
 			return nil
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		s.logger.Warn("notification delivery failed", "message_id", notification.ID, "attempt", attempt+1, "error", lastErr)
+		s.logger.Warn("notification delivery failed", "message_id", attemptNotification.ID, "attempt", attempt+1, "error", lastErr)
 		if attempt+1 < notifyAttempts {
 			if err := waitForClock(ctx, s.clock, notifyBackoff<<attempt); err != nil {
 				return err

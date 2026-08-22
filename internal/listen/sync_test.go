@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -171,6 +174,99 @@ func TestSyncerUsesConvertedSoundBaseName(t *testing.T) {
 	}
 }
 
+func TestSyncerDeliversSharedIconBatchWhenNotifierConsumesFiles(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/icons/chat.png" {
+			t.Errorf("path = %q", request.URL.Path)
+		}
+		_, _ = writer.Write([]byte("fake-png-data"))
+	}))
+	defer server.Close()
+
+	client := api.New(server.URL, "0.0.0-test", api.WithSleep(func(time.Duration) {}))
+	notifier := &consumingNotifier{}
+	store := &memoryStore{state: &config.State{}}
+	deadLetterPath := filepath.Join(t.TempDir(), "deadletter.jsonl")
+	syncer := newSyncer(syncerConfig{
+		ctx:         context.Background(),
+		store:       store,
+		state:       store.state,
+		client:      client,
+		notifier:    notifier,
+		logger:      testLogger(),
+		cache:       newAssetCache(client, t.TempDir(), t.TempDir(), notifier, testLogger()),
+		deadLetters: newDeadLetterWriter(deadLetterPath, realClock{}, testLogger()),
+		fetch: func(context.Context, *api.Client, string, string) ([]openclient.Message, error) {
+			return []openclient.Message{
+				{ID: 1, IDStr: "1", Title: "first", Message: "first body", Icon: "chat"},
+				{ID: 2, IDStr: "2", Title: "second", Message: "second body", Icon: "chat"},
+			}, nil
+		},
+		updateHighest: func(context.Context, string, string, int64) error { return nil },
+	})
+
+	if err := syncer.runOnce(context.Background()); err != nil {
+		t.Fatalf("runOnce() error = %v", err)
+	}
+	want := []deliveredNotification{
+		{id: "1", title: "first", body: "first body"},
+		{id: "2", title: "second", body: "second body"},
+	}
+	if got := notifier.Delivered(); !reflect.DeepEqual(got, want) {
+		t.Errorf("delivered notifications = %#v, want %#v", got, want)
+	}
+	data, err := os.ReadFile(deadLetterPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ReadFile(dead letter) error = %v", err)
+	}
+	if len(data) != 0 {
+		t.Errorf("dead-letter bytes = %d, want 0", len(data))
+	}
+}
+
+func TestSyncerRestagesIconAfterConsumingFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/icons/chat.png" {
+			t.Errorf("path = %q", request.URL.Path)
+		}
+		_, _ = writer.Write([]byte("fake-png-data"))
+	}))
+	defer server.Close()
+
+	client := api.New(server.URL, "0.0.0-test", api.WithSleep(func(time.Duration) {}))
+	notifier := &consumingFailureNotifier{}
+	store := &memoryStore{state: &config.State{}}
+	deadLetterPath := filepath.Join(t.TempDir(), "deadletter.jsonl")
+	syncer := newSyncer(syncerConfig{
+		ctx:         context.Background(),
+		store:       store,
+		state:       store.state,
+		client:      client,
+		notifier:    notifier,
+		logger:      testLogger(),
+		cache:       newAssetCache(client, t.TempDir(), t.TempDir(), notifier, testLogger()),
+		deadLetters: newDeadLetterWriter(deadLetterPath, realClock{}, testLogger()),
+		fetch: func(context.Context, *api.Client, string, string) ([]openclient.Message, error) {
+			return []openclient.Message{{ID: 1, IDStr: "1", Title: "first", Message: "first body", Icon: "chat"}}, nil
+		},
+		updateHighest: func(context.Context, string, string, int64) error { return nil },
+	})
+
+	if err := syncer.runOnce(context.Background()); err != nil {
+		t.Fatalf("runOnce() error = %v", err)
+	}
+	data, err := os.ReadFile(deadLetterPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ReadFile(dead letter) error = %v", err)
+	}
+	if len(data) != 0 {
+		t.Errorf("dead-letter bytes = %d, want 0", len(data))
+	}
+	if got := notifier.calls.Load(); got != 2 {
+		t.Errorf("notify calls = %d, want 2", got)
+	}
+}
+
 func TestSyncerRetriesThenDeadLettersAndContinues(t *testing.T) {
 	clock := newFakeClock()
 	deadLetterPath := filepath.Join(t.TempDir(), "deadletter.jsonl")
@@ -316,6 +412,77 @@ func (n *recordingNotifier) Last() notify.Notification {
 type failingNotifier struct {
 	err   error
 	calls atomic.Int32
+}
+
+type deliveredNotification struct {
+	id    string
+	title string
+	body  string
+}
+
+type consumingNotifier struct {
+	mu        sync.Mutex
+	delivered []deliveredNotification
+}
+
+type consumingFailureNotifier struct {
+	calls atomic.Int32
+}
+
+func (n *consumingNotifier) Notify(_ context.Context, notification notify.Notification) error {
+	if notification.IconPath != "" {
+		if _, err := os.ReadFile(notification.IconPath); err != nil {
+			return fmt.Errorf("consume icon: %w", err)
+		}
+	}
+	if notification.AttachmentPath != "" {
+		if _, err := os.ReadFile(notification.AttachmentPath); err != nil {
+			return fmt.Errorf("consume attachment: %w", err)
+		}
+	}
+
+	n.mu.Lock()
+	n.delivered = append(n.delivered, deliveredNotification{
+		id: notification.ID, title: notification.Title, body: notification.Body,
+	})
+	n.mu.Unlock()
+	for _, path := range []string{notification.IconPath, notification.AttachmentPath} {
+		if path != "" {
+			_ = os.Remove(path)
+		}
+	}
+	return nil
+}
+
+func (*consumingNotifier) Caps() notify.Caps {
+	return notify.Caps{Images: true}
+}
+
+func (n *consumingNotifier) Delivered() []deliveredNotification {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]deliveredNotification(nil), n.delivered...)
+}
+
+func (n *consumingFailureNotifier) Notify(_ context.Context, notification notify.Notification) error {
+	call := n.calls.Add(1)
+	if notification.IconPath == "" {
+		return errors.New("missing notification icon")
+	}
+	if _, err := os.ReadFile(notification.IconPath); err != nil {
+		return fmt.Errorf("read notification icon: %w", err)
+	}
+	if call == 1 {
+		if err := os.Remove(notification.IconPath); err != nil {
+			return fmt.Errorf("consume notification icon: %w", err)
+		}
+		return errors.New("forced notification failure")
+	}
+	return nil
+}
+
+func (*consumingFailureNotifier) Caps() notify.Caps {
+	return notify.Caps{Images: true}
 }
 
 func (n *failingNotifier) Notify(context.Context, notify.Notification) error {

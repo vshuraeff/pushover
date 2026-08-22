@@ -4,15 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 )
 
+const consumeFilesEnv = "PUSHOVER_FILE_NOTIFIER_CONSUME_FILES"
+
 // FileNotifier records intended notifications as line-delimited json.
 type FileNotifier struct {
-	mu   sync.Mutex
-	file *os.File
-	path string
+	mu           sync.Mutex
+	file         *os.File
+	path         string
+	consumeFiles bool
 }
 
 type fileRecord struct {
@@ -34,12 +38,16 @@ type fileRecord struct {
 
 // NewFileNotifier creates a notifier that appends records to path.
 func NewFileNotifier(path string) (*FileNotifier, error) {
+	return newFileNotifier(path, false)
+}
+
+func newFileNotifier(path string, consumeFiles bool) (*FileNotifier, error) {
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, err
 	}
 
-	return &FileNotifier{file: file, path: path}, nil
+	return &FileNotifier{file: file, path: path, consumeFiles: consumeFiles}, nil
 }
 
 // Notify appends one record for n.
@@ -72,8 +80,31 @@ func (f *FileNotifier) Notify(_ context.Context, n Notification) error {
 	if f.file == nil {
 		return errors.New("notify: file notifier is closed")
 	}
-	_, err = f.file.Write(data)
-	return err
+	paths := []string{n.IconPath, n.AttachmentPath}
+	if f.consumeFiles {
+		for _, path := range paths {
+			if path == "" {
+				continue
+			}
+			if _, err := os.Stat(path); err != nil {
+				return fmt.Errorf("notify: consume file %q: %w", path, err)
+			}
+		}
+	}
+	if _, err = f.file.Write(data); err != nil {
+		return err
+	}
+	if f.consumeFiles {
+		for _, path := range paths {
+			if path == "" {
+				continue
+			}
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("notify: remove consumed file %q: %w", path, err)
+			}
+		}
+	}
+	return nil
 }
 
 // Caps returns the fields that the file backend records.

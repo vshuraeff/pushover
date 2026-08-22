@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/vshuraeff/pushover/internal/api"
 	"github.com/vshuraeff/pushover/internal/notify"
@@ -44,7 +45,16 @@ func newAssetCache(client *api.Client, iconDir, soundDir string, notifier notify
 }
 
 func (c *assetCache) Icon(ctx context.Context, key string) string {
-	return c.resolve(ctx, c.iconDir, key, ".png", "/icons/", "icon")
+	cachedPath := c.resolve(ctx, c.iconDir, key, ".png", "/icons/", "icon")
+	if cachedPath == "" {
+		return ""
+	}
+	deliveryPath, err := stageCachedAsset(c.iconDir, cachedPath)
+	if err != nil {
+		c.logger.Warn("stage cached icon", "key", key, "error", err)
+		return ""
+	}
+	return deliveryPath
 }
 
 func (c *assetCache) Sound(ctx context.Context, key string) cachedSound {
@@ -82,10 +92,14 @@ func (c *assetCache) resolve(ctx context.Context, dir, key, extension, pathPrefi
 			c.logger.Warn("cached asset is a directory", "kind", kind, "path", path)
 			return ""
 		}
-		return path
+		file, openErr := os.Open(path)
+		if openErr == nil {
+			_ = file.Close()
+			return path
+		}
+		c.logger.Warn("read cached asset", "kind", kind, "path", path, "error", openErr)
 	} else if !os.IsNotExist(err) {
 		c.logger.Warn("inspect cached asset", "kind", kind, "path", path, "error", err)
-		return ""
 	}
 	if c.client == nil {
 		return ""
@@ -110,6 +124,49 @@ func (c *assetCache) resolve(ctx context.Context, dir, key, extension, pathPrefi
 	}
 	c.logger.Info("cache miss", "kind", kind, "key", key)
 	return path
+}
+
+func stageCachedAsset(dir, cachedPath string) (path string, err error) {
+	deliveryDir, err := os.MkdirTemp(dir, ".delivery-")
+	if err != nil {
+		return "", fmt.Errorf("create delivery directory: %w", err)
+	}
+	target := filepath.Join(deliveryDir, filepath.Base(cachedPath))
+	defer func() {
+		if err == nil {
+			return
+		}
+		_ = os.Remove(target)
+		_ = os.Remove(deliveryDir)
+	}()
+
+	if linkErr := os.Link(cachedPath, target); linkErr == nil {
+		return target, nil
+	}
+	data, err := os.ReadFile(cachedPath)
+	if err != nil {
+		return "", fmt.Errorf("read cached asset: %w", err)
+	}
+	if err := os.WriteFile(target, data, 0o600); err != nil {
+		return "", fmt.Errorf("copy cached asset: %w", err)
+	}
+	return target, nil
+}
+
+func (c *assetCache) cleanupIcon(path string) {
+	if path == "" || c.iconDir == "" {
+		return
+	}
+	deliveryDir := filepath.Dir(path)
+	if filepath.Dir(deliveryDir) != filepath.Clean(c.iconDir) || !strings.HasPrefix(filepath.Base(deliveryDir), ".delivery-") {
+		return
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		c.logger.Debug("remove delivered icon", "path", path, "error", err)
+	}
+	if err := os.Remove(deliveryDir); err != nil && !os.IsNotExist(err) {
+		c.logger.Debug("remove icon delivery directory", "path", deliveryDir, "error", err)
+	}
 }
 
 func writeCacheFile(dir, target string, body []byte) (err error) {

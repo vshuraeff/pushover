@@ -72,7 +72,9 @@ func Run(ctx context.Context, daemon *Daemon) error {
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
+	cache := newAssetCache(daemon.APIClient, iconDir, soundDir, daemon.Notifier, logger)
 	emergencies := NewEmergencyScheduler(daemon.Notifier, interval, clock, logger)
+	emergencies.cache = cache
 	emergencyDone := make(chan struct{})
 	go func() {
 		emergencies.Run(runCtx)
@@ -87,7 +89,7 @@ func Run(ctx context.Context, daemon *Daemon) error {
 		notifier:    daemon.Notifier,
 		logger:      logger,
 		clock:       clock,
-		cache:       newAssetCache(daemon.APIClient, iconDir, soundDir, daemon.Notifier, logger),
+		cache:       cache,
 		deadLetters: newDeadLetterWriter(deadLetterPath, clock, logger),
 		emergencies: emergencies,
 		secret:      state.Secret,

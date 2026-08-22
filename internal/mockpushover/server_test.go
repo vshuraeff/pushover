@@ -53,8 +53,20 @@ func testSeed() SeedState {
 
 func startTestServer(t *testing.T) *Server {
 	t.Helper()
+	return startTestServerWithConfig(t, nil)
+}
+
+// startTestServerWithConfig starts a mock server with the shared test seed,
+// letting the caller tweak Config fields (e.g. websocket login timeout or
+// keepalive interval) before Start.
+func startTestServerWithConfig(t *testing.T, configure func(*Config)) *Server {
+	t.Helper()
 	seed := testSeed()
-	server, err := Start(Config{InitialState: &seed})
+	cfg := Config{InitialState: &seed}
+	if configure != nil {
+		configure(&cfg)
+	}
+	server, err := Start(cfg)
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}

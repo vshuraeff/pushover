@@ -17,7 +17,7 @@ func Select(ctx context.Context) (Notifier, error) {
 func selectNotifier(ctx context.Context, getenv func(string) string) (Notifier, error) {
 	if backend := getenv(backendEnv); backend != "" {
 		if path, ok := strings.CutPrefix(backend, "file:"); ok {
-			notifier, err := NewFileNotifier(path)
+			notifier, err := newFileNotifier(path, getenv(consumeFilesEnv) == "1")
 			if err != nil {
 				return nil, fmt.Errorf("notify: create file backend: %w", err)
 			}

@@ -65,3 +65,32 @@ func TestFileNotifierWritesNotificationRecord(t *testing.T) {
 		t.Fatalf("record level = %q, soundSuppressed = %t", record.Level, record.SoundSuppressed)
 	}
 }
+
+func TestFileNotifierConsumeFilesMode(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "notifications.jsonl")
+	iconPath := filepath.Join(root, "icon.png")
+	if err := os.WriteFile(iconPath, []byte("fake-png-data"), 0o600); err != nil {
+		t.Fatalf("WriteFile(icon) error = %v", err)
+	}
+	notifier, err := newFileNotifier(path, true)
+	if err != nil {
+		t.Fatalf("newFileNotifier() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := notifier.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+
+	notification := Notification{ID: "id-1", IconPath: iconPath}
+	if err := notifier.Notify(context.Background(), notification); err != nil {
+		t.Fatalf("Notify() error = %v", err)
+	}
+	if _, err := os.Stat(iconPath); !os.IsNotExist(err) {
+		t.Fatalf("Stat(consumed icon) error = %v, want not exist", err)
+	}
+	if err := notifier.Notify(context.Background(), notification); err == nil {
+		t.Fatal("Notify() error = nil for missing consumed icon")
+	}
+}

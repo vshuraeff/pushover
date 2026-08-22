@@ -42,11 +42,12 @@ func TestAssetCacheDownloadsAtomicallyAndReusesFiles(t *testing.T) {
 	cache := newAssetCache(client, iconDir, soundDir, &channelNotifier{}, logger)
 
 	iconPath := cache.Icon(context.Background(), "chat")
-	if iconPath != filepath.Join(iconDir, "chat.png") {
+	if filepath.Base(iconPath) != "chat.png" {
 		t.Fatalf("icon path = %q", iconPath)
 	}
-	if second := cache.Icon(context.Background(), "chat"); second != iconPath {
-		t.Fatalf("cached icon path = %q, want %q", second, iconPath)
+	secondIconPath := cache.Icon(context.Background(), "chat")
+	if secondIconPath == iconPath {
+		t.Fatalf("cached icon path = %q, want a distinct delivery path", secondIconPath)
 	}
 	soundPath := cache.resolve(context.Background(), soundDir, "bike", ".mp3", "/sounds/", "sound")
 	if soundPath != filepath.Join(soundDir, "bike.mp3") {
@@ -60,12 +61,16 @@ func TestAssetCacheDownloadsAtomicallyAndReusesFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(icon) error = %v", err)
 	}
+	secondIconData, err := os.ReadFile(secondIconPath)
+	if err != nil {
+		t.Fatalf("ReadFile(second icon) error = %v", err)
+	}
 	soundData, err := os.ReadFile(soundPath)
 	if err != nil {
 		t.Fatalf("ReadFile(sound) error = %v", err)
 	}
-	if string(iconData) != "fake-png-data" || string(soundData) != "fake-mp3-data" {
-		t.Fatalf("cache contents = %q, %q", iconData, soundData)
+	if string(iconData) != "fake-png-data" || string(secondIconData) != "fake-png-data" || string(soundData) != "fake-mp3-data" {
+		t.Fatalf("cache contents = %q, %q, %q", iconData, secondIconData, soundData)
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -74,6 +79,32 @@ func TestAssetCacheDownloadsAtomicallyAndReusesFiles(t *testing.T) {
 	}
 	if got := strings.Count(logs.String(), "cache miss"); got != 2 {
 		t.Fatalf("cache miss log lines = %d, want 2; logs = %q", got, logs.String())
+	}
+}
+
+func TestAssetCacheIconResolvesAfterDeliveredFileIsRemoved(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/icons/chat.png" {
+			t.Errorf("path = %q", request.URL.Path)
+		}
+		_, _ = writer.Write([]byte("fake-png-data"))
+	}))
+	defer server.Close()
+
+	client := api.New(server.URL, "0.0.0-test", api.WithSleep(func(time.Duration) {}))
+	cache := newAssetCache(client, t.TempDir(), t.TempDir(), &channelNotifier{}, testLogger())
+	first := cache.Icon(context.Background(), "chat")
+	if err := os.Remove(first); err != nil {
+		t.Fatalf("Remove(first icon) error = %v", err)
+	}
+
+	second := cache.Icon(context.Background(), "chat")
+	data, err := os.ReadFile(second)
+	if err != nil {
+		t.Fatalf("ReadFile(second icon) error = %v", err)
+	}
+	if string(data) != "fake-png-data" {
+		t.Fatalf("second icon contents = %q", data)
 	}
 }
 

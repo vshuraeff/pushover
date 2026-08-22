@@ -67,6 +67,61 @@ func TestWebSocketRejectsDisabledDevice(t *testing.T) {
 	requireWebSocketClosed(t, conn)
 }
 
+// TestWebSocketBinaryLoginIsIgnored mirrors the real pushover open client
+// websocket server: a login payload sent as a binary frame is silently
+// dropped (no login, no 'E' error, no session) and the connection idles
+// until the server-side login timeout closes it.
+func TestWebSocketBinaryLoginIsIgnored(t *testing.T) {
+	const loginTimeout = 200 * time.Millisecond
+	server := startTestServerWithConfig(t, func(cfg *Config) {
+		cfg.LoginTimeout = loginTimeout
+	})
+	conn := dialWebSocket(t, server)
+	writeWebSocketBinary(t, conn, "login:"+testDeviceID+":"+testBinding+"\n")
+
+	// No status flip while the login is being ignored.
+	time.Sleep(loginTimeout / 2)
+	status, err := server.Control().WSStatus()
+	if err != nil {
+		t.Fatalf("WSStatus() error = %v", err)
+	}
+	if status.Connected || status.LoginOK || status.ConnectCount != 0 {
+		t.Fatalf("status = %+v, want an ignored binary login", status)
+	}
+
+	// The server closes the idle connection once the login timeout elapses,
+	// without ever sending a frame.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, payload, readErr := conn.Read(ctx); readErr == nil {
+		t.Fatalf("Read() payload = %q, want server close", payload)
+	} else if errors.Is(readErr, context.DeadlineExceeded) {
+		t.Fatalf("Read() error = %v, want server close before deadline", readErr)
+	}
+
+	status, err = server.Control().WSStatus()
+	if err != nil {
+		t.Fatalf("WSStatus() error = %v", err)
+	}
+	if status.Connected || status.LoginOK || status.ConnectCount != 0 {
+		t.Fatalf("status = %+v, want an ignored binary login", status)
+	}
+}
+
+// TestWebSocketSendsProactiveKeepalive verifies that a logged-in session
+// receives '#' keepalive frames on its own, without a control-plane nudge.
+func TestWebSocketSendsProactiveKeepalive(t *testing.T) {
+	server := startTestServerWithConfig(t, func(cfg *Config) {
+		cfg.KeepaliveInterval = 100 * time.Millisecond
+	})
+	conn := dialWebSocket(t, server)
+	writeWebSocket(t, conn, "login:"+testDeviceID+":"+testBinding+"\n")
+	waitWebSocketStatus(t, server, func(status WSStatus) bool { return status.Connected })
+
+	requireWebSocketFrame(t, conn, '#')
+	requireWebSocketFrame(t, conn, '#')
+}
+
 func TestControlWebSocketSend(t *testing.T) {
 	server := startTestServer(t)
 	conn := dialWebSocket(t, server)
@@ -196,6 +251,15 @@ func writeWebSocket(t *testing.T, conn *websocket.Conn, message string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := conn.Write(ctx, websocket.MessageText, []byte(message)); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+}
+
+func writeWebSocketBinary(t *testing.T, conn *websocket.Conn, message string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := conn.Write(ctx, websocket.MessageBinary, []byte(message)); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 }

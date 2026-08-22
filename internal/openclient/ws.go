@@ -140,9 +140,15 @@ type readResult struct {
 
 func (e *Engine) serve(ctx context.Context, conn *websocket.Conn, clock Clock, logger *slog.Logger, attempt uint) (connectionOutcome, bool) {
 	login := []byte("login:" + e.DeviceID + ":" + e.Secret + "\n")
-	if err := conn.Write(ctx, websocket.MessageBinary, login); err != nil {
+	// The pushover open client websocket server only recognizes a login
+	// frame sent as a text message; a binary frame is silently ignored and
+	// the connection idles until the server-side timeout closes it.
+	if err := conn.Write(ctx, websocket.MessageText, login); err != nil {
 		logger.Warn("websocket login write failed", "attempt", attempt, "err", err)
 		return connectionFailed, false
+	}
+	if e.OnSync != nil {
+		e.OnSync()
 	}
 
 	connectedAt := clock.Now()

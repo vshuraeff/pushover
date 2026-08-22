@@ -15,6 +15,7 @@ const emergencyLifetime = 3 * time.Hour
 type emergencyState struct {
 	messageID    int64
 	notification notify.Notification
+	iconKey      string
 }
 
 // clock and timer match the daemon's deterministic scheduling needs.
@@ -32,6 +33,7 @@ type Timer interface {
 type scheduledEmergency struct {
 	messageID    int64
 	notification notify.Notification
+	iconKey      string
 	firstSeen    time.Time
 	nextAlert    time.Time
 	generation   uint64
@@ -41,6 +43,7 @@ type dueEmergency struct {
 	receipt      string
 	generation   uint64
 	notification notify.Notification
+	iconKey      string
 }
 
 // emergencyscheduler locally re-alerts receipts until the server view closes them.
@@ -50,6 +53,7 @@ type EmergencyScheduler struct {
 	interval time.Duration
 	clock    Clock
 	logger   *slog.Logger
+	cache    *assetCache
 
 	mu      sync.Mutex
 	entries map[string]*scheduledEmergency
@@ -107,12 +111,14 @@ func (s *EmergencyScheduler) update(open map[string]emergencyState) {
 		if entry, ok := s.entries[receipt]; ok {
 			entry.messageID = emergency.messageID
 			entry.notification = notification
+			entry.iconKey = emergency.iconKey
 			entry.generation++
 			continue
 		}
 		s.entries[receipt] = &scheduledEmergency{
 			messageID:    emergency.messageID,
 			notification: notification,
+			iconKey:      emergency.iconKey,
 			firstSeen:    now,
 			nextAlert:    now.Add(s.interval),
 			generation:   1,
@@ -168,8 +174,15 @@ func (s *EmergencyScheduler) Run(ctx context.Context) {
 			if !s.isCurrent(due) {
 				continue
 			}
-			if err := s.notifier.Notify(ctx, due.notification); err != nil && ctx.Err() == nil {
+			notification := due.notification
+			if s.cache != nil && due.iconKey != "" {
+				notification.IconPath = s.cache.Icon(ctx, due.iconKey)
+			}
+			if err := s.notifier.Notify(ctx, notification); err != nil && ctx.Err() == nil {
 				s.logger.Warn("emergency re-alert failed", "receipt", due.receipt, "error", err)
+			}
+			if s.cache != nil {
+				s.cache.cleanupIcon(notification.IconPath)
 			}
 		}
 	}
@@ -213,6 +226,7 @@ func (s *EmergencyScheduler) takeDue(now time.Time) []dueEmergency {
 			receipt:      receipt,
 			generation:   entry.generation,
 			notification: entry.notification,
+			iconKey:      entry.iconKey,
 		})
 		entry.nextAlert = now.Add(s.interval)
 	}
