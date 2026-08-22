@@ -203,6 +203,7 @@ func bootout() error {
 	return err
 }
 
+// launchctl bootout exits 3 (ESRCH) when the service is not loaded; confirmed empirically on macOS.
 func isServiceNotLoaded(err error) bool {
 	return hasLaunchctlExitCode(err, 3)
 }
@@ -308,6 +309,11 @@ func writePlist(path, executable string) error {
 	if err := temp.Chmod(0o644); err != nil {
 		_ = temp.Close()
 		return fmt.Errorf("launchagent: set plist permissions %q: %w", tempPath, err)
+	}
+	// sync the temporary plist before rename for durability against power loss during install.
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("launchagent: sync temporary plist %q: %w", tempPath, err)
 	}
 	if err := temp.Close(); err != nil {
 		return fmt.Errorf("launchagent: close temporary plist %q: %w", tempPath, err)
