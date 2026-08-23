@@ -21,8 +21,9 @@ Two halves:
 - Go 1.26 or newer to build.
 - macOS or Linux; the session store uses `flock`, so Windows is not supported.
   Notifications are macOS-only — on Linux the notification backend is a stub and
-  `povr client listen` refuses to start, while sending is unaffected (see
-  [Known limits](#known-limits)).
+  `povr client listen` refuses to start unless `PUSHOVER_NOTIFY_BACKEND=file:<path>`
+  is set (see [Install via Docker](#install-via-docker)), while sending is unaffected
+  (see [Known limits](#known-limits)).
 
 ## Install
 
@@ -68,6 +69,49 @@ handed to the notification backend. With the `alerter` or `osascript` fallback b
 it is passed as a process argument, visible to any local observer via `ps`; the `file`
 backend writes it to disk (permissions `0600`). The default `helper` backend (macOS
 `UNUserNotificationCenter`) is not affected by either limitation.
+
+### Install via Docker
+
+```sh
+docker pull ghcr.io/vshuraeff/povr:latest
+```
+
+Multi-arch (amd64/arm64) `scratch` image containing only the `povr` binary and CA
+certificates. Config and session state live in `/data` (`PUSHOVER_CONFIG_DIR=/data`
+and `HOME=/data` are set in the image; `/data` is declared as `VOLUME` and owned by
+uid 65532).
+
+There is no native notification backend on Linux, so the image defaults
+`PUSHOVER_NOTIFY_BACKEND=file:/data/notifications.jsonl`: the daemon appends each
+notification as a JSON line to that file. Override the variable to point elsewhere.
+
+```sh
+docker run -it -v povr-data:/data ghcr.io/vshuraeff/povr:latest client login
+docker run -it -v povr-data:/data ghcr.io/vshuraeff/povr:latest client register --name docker
+docker run -v povr-data:/data ghcr.io/vshuraeff/povr:latest client listen
+```
+
+`login` and `register` are interactive (password, 2FA code) and need `-it`; `register`
+must run before `listen`, which otherwise has no device to authenticate as.
+
+Read notifications by tailing the file from the same volume with another image, since
+the scratch image has no `tail`:
+
+```sh
+docker run --rm -v povr-data:/data busybox tail -f /data/notifications.jsonl
+```
+
+### Install via Debian/Ubuntu package
+
+Static `.deb` packages (amd64/arm64) for Debian/Ubuntu are published on
+the [GitHub Releases](https://github.com/vshuraeff/pushover/releases) page.
+
+```sh
+sudo dpkg -i povr_<version>_linux_amd64.deb
+```
+
+Installs the statically linked binary to `/usr/bin/povr`; there are no runtime
+dependencies.
 
 ## Credentials
 

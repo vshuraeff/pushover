@@ -1,0 +1,6 @@
+.git
+dist
+.claude
+.serena
+*.test
+.DS_Store

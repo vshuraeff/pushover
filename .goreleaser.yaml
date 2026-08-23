@@ -1,0 +1,92 @@
+version: 2
+
+release:
+  prerelease: auto
+
+builds:
+  - id: povr
+    main: ./cmd/povr
+    binary: povr
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/vshuraeff/pushover/internal/cli.Version={{ .Version }}
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: 'povr_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+
+nfpms:
+  - ids:
+      - povr
+    package_name: povr
+    formats:
+      - deb
+    bindir: /usr/bin
+    maintainer: Valentin Shuraeff <325606+vshuraeff@users.noreply.github.com>
+    description: Command-line client for the Pushover API.
+    license: MIT
+    homepage: https://github.com/vshuraeff/pushover
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/povr/copyright
+
+dockers:
+  - id: povr-amd64
+    ids:
+      - povr
+    goos: linux
+    goarch: amd64
+    use: buildx
+    dockerfile: Dockerfile
+    image_templates:
+      - ghcr.io/vshuraeff/povr:{{ .Version }}-amd64
+    build_flag_templates:
+      - --platform=linux/amd64
+      - --label=org.opencontainers.image.source=https://github.com/vshuraeff/pushover
+      - --label=org.opencontainers.image.version={{ .Version }}
+      - --label=org.opencontainers.image.revision={{ .FullCommit }}
+      - --label=org.opencontainers.image.licenses=MIT
+      - --label=org.opencontainers.image.description=Unofficial Pushover CLI client
+  - id: povr-arm64
+    ids:
+      - povr
+    goos: linux
+    goarch: arm64
+    use: buildx
+    dockerfile: Dockerfile
+    image_templates:
+      - ghcr.io/vshuraeff/povr:{{ .Version }}-arm64
+    build_flag_templates:
+      - --platform=linux/arm64
+      - --label=org.opencontainers.image.source=https://github.com/vshuraeff/pushover
+      - --label=org.opencontainers.image.version={{ .Version }}
+      - --label=org.opencontainers.image.revision={{ .FullCommit }}
+      - --label=org.opencontainers.image.licenses=MIT
+      - --label=org.opencontainers.image.description=Unofficial Pushover CLI client
+
+docker_manifests:
+  - name_template: ghcr.io/vshuraeff/povr:{{ .Version }}
+    image_templates:
+      - ghcr.io/vshuraeff/povr:{{ .Version }}-amd64
+      - ghcr.io/vshuraeff/povr:{{ .Version }}-arm64
+  - name_template: ghcr.io/vshuraeff/povr:latest
+    skip_push: auto
+    image_templates:
+      - ghcr.io/vshuraeff/povr:{{ .Version }}-amd64
+      - ghcr.io/vshuraeff/povr:{{ .Version }}-arm64
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: git
+
+snapshot:
+  version_template: '{{ .Version }}-next'
