@@ -41,7 +41,14 @@ func Install(opts InstallOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := writePlist(plistPath, executable); err != nil {
+	logDirectory, err := launchAgentLogDirectory()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(logDirectory, 0o755); err != nil {
+		return fmt.Errorf("launchagent: create log directory %q: %w", logDirectory, err)
+	}
+	if err := writePlist(plistPath, executable, logDirectory); err != nil {
 		return err
 	}
 	bootoutErr := bootout()
@@ -268,11 +275,19 @@ func launchAgentPath(dest string) (string, error) {
 	return filepath.Join(dest, plistFilename), nil
 }
 
+func launchAgentLogDirectory() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("launchagent: locate home directory: %w", err)
+	}
+	return filepath.Join(home, "Library", "Logs", "povr"), nil
+}
+
 func guiDomain() string {
 	return fmt.Sprintf("gui/%d", os.Getuid())
 }
 
-func writePlist(path, executable string) error {
+func writePlist(path, executable, logDirectory string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("launchagent: create plist directory %q: %w", filepath.Dir(path), err)
 	}
@@ -283,7 +298,7 @@ func writePlist(path, executable string) error {
 	contents.WriteByte('\n')
 	encoder := xml.NewEncoder(&contents)
 	encoder.Indent("", "\t")
-	if err := encoder.Encode(launchdPlist(executable)); err != nil {
+	if err := encoder.Encode(launchdPlist(executable, logDirectory)); err != nil {
 		return fmt.Errorf("launchagent: encode plist: %w", err)
 	}
 	if err := encoder.Flush(); err != nil {
@@ -325,7 +340,7 @@ func writePlist(path, executable string) error {
 	return nil
 }
 
-func launchdPlist(executable string) plistDocument {
+func launchdPlist(executable, logDirectory string) plistDocument {
 	return plistDocument{
 		XMLName: xml.Name{Local: "plist"},
 		Version: "1.0",
@@ -348,6 +363,10 @@ func launchdPlist(executable string) plistDocument {
 					{XMLName: xml.Name{Local: "true"}},
 					stringElement("key", "KeepAlive"),
 					{XMLName: xml.Name{Local: "true"}},
+					stringElement("key", "StandardOutPath"),
+					stringElement("string", filepath.Join(logDirectory, "daemon.out.log")),
+					stringElement("key", "StandardErrorPath"),
+					stringElement("string", filepath.Join(logDirectory, "daemon.err.log")),
 				},
 			},
 		},

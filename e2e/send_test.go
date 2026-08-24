@@ -84,6 +84,28 @@ func TestSendEchoesEveryParameter(t *testing.T) {
 	}
 }
 
+func TestSendEncryptedWithoutKeyFailsBeforeRequest(t *testing.T) {
+	h := newHarness(t, defaultSeed())
+	h.env = h.withEnv(map[string]string{"PUSHOVER_ENCRYPTION_KEY": ""})
+
+	result := h.run(t, "send", "must not send", "--encrypted")
+	requireFailure(t, result, "missing encryption_key credential")
+	if requests := h.requests(t); len(requests) != 0 {
+		t.Fatalf("request count = %d, want 0", len(requests))
+	}
+}
+
+func TestSendEncryptedMalformedKeyFailsBeforeRequest(t *testing.T) {
+	h := newHarness(t, defaultSeed())
+	h.env = h.withEnv(map[string]string{"PUSHOVER_ENCRYPTION_KEY": fixtureInvalidKey})
+
+	result := h.run(t, "send", "must not send", "--encrypted")
+	requireFailure(t, result, "encryption key must be 64 hexadecimal characters")
+	if requests := h.requests(t); len(requests) != 0 {
+		t.Fatalf("request count = %d, want 0", len(requests))
+	}
+}
+
 func TestSendMultipartAttachment(t *testing.T) {
 	h := newHarness(t, defaultSeed())
 	attachment := []byte("small raw attachment fixture\n")

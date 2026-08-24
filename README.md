@@ -206,6 +206,10 @@ Generate a 64-character hex key with `openssl rand -hex 32` and configure it thr
 `--encryption-key-env`, `PUSHOVER_ENCRYPTION_KEY`, or `encryption_key` in the config
 file. `--encrypted` fails without sending when no encryption key credential resolves.
 
+Encrypted messages are delivered by Pushover's servers only to the official iOS/Android apps;
+Open Client devices, including `povr client listen`, will not receive them. `listen` implements
+decryption and will use it automatically if Pushover extends encrypted delivery to Open Client.
+
 ```sh
 # attachment; 5242880 bytes maximum, --attachment and --attachment-base64 are exclusive
 povr send --title "CI" --attachment ./failure.png "build 412 failed"

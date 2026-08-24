@@ -60,7 +60,7 @@ func TestSendCommandFullFlags(t *testing.T) {
 	defer server.Close()
 	configureCLITestEnv(t, server.URL)
 
-	output, err := executeCLI(t, nil,
+	output, stderr, err := executeCLIWithStderr(t, nil,
 		"send", "--user", " direct-user, group-key ", "--device", "phone", "--title", "title",
 		"--url", "https://example.test", "--url-title", "example", "--priority", "2", "--retry", "30",
 		"--expire", "3600", "--callback", "https://example.test/callback", "--tags", "release",
@@ -76,6 +76,25 @@ func TestSendCommandFullFlags(t *testing.T) {
 	}
 	if result.Request != "request-id" || result.Receipt != "receipt-id" {
 		t.Errorf("send JSON result = %+v", result)
+	}
+	if !strings.Contains(stderr, "warning: encrypted messages are delivered only to the official iOS/Android apps; Open Client devices (including povr client listen) will not receive them") {
+		t.Errorf("send stderr = %q, want encryption delivery warning", stderr)
+	}
+}
+
+func TestSendCommandDoesNotWarnWithoutEncryption(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"status":1,"request":"request-id"}`))
+	}))
+	defer server.Close()
+	configureCLITestEnv(t, server.URL)
+
+	_, stderr, err := executeCLIWithStderr(t, nil, "send", "message")
+	if err != nil {
+		t.Fatalf("povr send error = %v", err)
+	}
+	if stderr != "" {
+		t.Errorf("send stderr = %q, want empty", stderr)
 	}
 }
 
@@ -265,18 +284,23 @@ func configureCLITestEnv(t *testing.T, apiURL string) {
 }
 
 func executeCLI(t *testing.T, input io.Reader, args ...string) (string, error) {
+	output, _, err := executeCLIWithStderr(t, input, args...)
+	return output, err
+}
+
+func executeCLIWithStderr(t *testing.T, input io.Reader, args ...string) (string, string, error) {
 	t.Helper()
 	cmd := NewRootCommand()
 	Register(cmd)
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
-	var output bytes.Buffer
+	var output, stderr bytes.Buffer
 	cmd.SetOut(&output)
-	cmd.SetErr(&output)
+	cmd.SetErr(&stderr)
 	if input != nil {
 		cmd.SetIn(input)
 	}
 	cmd.SetArgs(args)
 	err := cmd.Execute()
-	return output.String(), err
+	return output.String(), stderr.String(), err
 }
