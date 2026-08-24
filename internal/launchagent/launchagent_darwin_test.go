@@ -22,6 +22,8 @@ type commandInvocation struct {
 
 func TestInstallWritesPlistAndBootstrapsAgent(t *testing.T) {
 	dest := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	realExecutable := filepath.Join(dest, "povr")
 	if err := os.WriteFile(realExecutable, []byte("povr"), 0o755); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -61,6 +63,20 @@ func TestInstallWritesPlistAndBootstrapsAgent(t *testing.T) {
 	}
 	if got := values["KeepAlive"].XMLName.Local; got != "true" {
 		t.Errorf("KeepAlive = <%s>, want <true>", got)
+	}
+	logDirectory := filepath.Join(home, "Library", "Logs", "povr")
+	if got, want := values["StandardOutPath"].Text, filepath.Join(logDirectory, "daemon.out.log"); got != want {
+		t.Errorf("StandardOutPath = %q, want %q", got, want)
+	}
+	if got, want := values["StandardErrorPath"].Text, filepath.Join(logDirectory, "daemon.err.log"); got != want {
+		t.Errorf("StandardErrorPath = %q, want %q", got, want)
+	}
+	logInfo, err := os.Stat(logDirectory)
+	if err != nil {
+		t.Fatalf("Stat(log directory) error = %v", err)
+	}
+	if got, want := logInfo.Mode().Perm(), os.FileMode(0o755); got != want {
+		t.Errorf("log directory permissions = %o, want %o", got, want)
 	}
 
 	if got, want := *invocations, []commandInvocation{
@@ -484,7 +500,7 @@ func TestWritePlistRemovesTemporaryFileAfterRenameFailure(t *testing.T) {
 		t.Fatalf("Mkdir() error = %v", err)
 	}
 
-	err := writePlist(path, "/tmp/povr")
+	err := writePlist(path, "/tmp/povr", filepath.Join(dest, "logs"))
 	if err == nil {
 		t.Fatal("writePlist() error = nil, want error")
 	}
@@ -500,7 +516,7 @@ func TestWritePlistRemovesTemporaryFileAfterRenameFailure(t *testing.T) {
 func TestWritePlistWritesCompleteContentWithoutLeftovers(t *testing.T) {
 	dest := t.TempDir()
 	path := filepath.Join(dest, plistFilename)
-	if err := writePlist(path, "/tmp/povr"); err != nil {
+	if err := writePlist(path, "/tmp/povr", filepath.Join(dest, "logs")); err != nil {
 		t.Fatalf("writePlist() error = %v", err)
 	}
 
@@ -531,7 +547,7 @@ func TestWritePlistWritesCompleteContentWithoutLeftovers(t *testing.T) {
 
 func TestWritePlistUsesSelfClosingBooleanTags(t *testing.T) {
 	path := filepath.Join(t.TempDir(), plistFilename)
-	if err := writePlist(path, "/tmp/povr"); err != nil {
+	if err := writePlist(path, "/tmp/povr", filepath.Join(t.TempDir(), "logs")); err != nil {
 		t.Fatalf("writePlist() error = %v", err)
 	}
 	contents, err := os.ReadFile(path)

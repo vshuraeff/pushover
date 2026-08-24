@@ -134,6 +134,9 @@ func newSendCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if encrypted {
+				fmt.Fprintln(cmd.ErrOrStderr(), "warning: encrypted messages are delivered only to the official iOS/Android apps; Open Client devices (including povr client listen) will not receive them")
+			}
 			if jsonOutput {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(response)
 			}

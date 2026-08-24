@@ -154,6 +154,120 @@ func TestClientListenSyncsAndHandlesReconnectAndTerminalFrames(t *testing.T) {
 	})
 }
 
+func TestClientListenDecryptsExplicitlyEncryptedMessage(t *testing.T) {
+	// this mock server delivers encrypted messages to Open Client devices; the real Pushover server does not.
+	seed := defaultSeed()
+	seed.Queues = map[string][]mockpushover.Message{}
+	h := newHarness(t, seed)
+	writeState(t, h.configDir, config.State{DeviceID: fixtureDeviceID, DeviceName: "phone", Secret: fixtureSecret})
+	h.start(t, "client", "listen")
+
+	eventually(t, 5*time.Second, 20*time.Millisecond, func() (bool, string) {
+		status, err := h.control.WSStatus()
+		return err == nil && status.Connected && status.LoginOK && status.ConnectCount >= 1, describeWSStatus(status, err)
+	})
+
+	result := h.run(t,
+		"send", "explicitly encrypted notification body",
+		"--user", fixtureUserKey,
+		"--device", "phone",
+		"--title", "explicitly encrypted notification title",
+		"--url", "https://example.test/explicit-encryption",
+		"--encrypted",
+	)
+	requireSuccess(t, result)
+
+	var request mockpushover.JournaledRequest
+	for _, candidate := range h.requests(t) {
+		if candidate.Method == http.MethodPost && candidate.Path == "/1/messages.json" {
+			request = candidate
+			break
+		}
+	}
+	if request.Path == "" {
+		t.Fatal("send request was not recorded")
+	}
+	requireField(t, request, "encrypted", "1")
+	for field, plaintext := range map[string]string{
+		"message": "explicitly encrypted notification body",
+		"title":   "explicitly encrypted notification title",
+		"url":     "https://example.test/explicit-encryption",
+	} {
+		values, ok := request.Fields[field]
+		if !ok || len(values) != 1 {
+			t.Fatalf("request field %q did not contain one encrypted value", field)
+		}
+		if values[0] == plaintext {
+			t.Fatalf("request field %q was sent as plaintext", field)
+		}
+	}
+
+	if err := h.control.WSSend("!"); err != nil {
+		t.Fatalf("send websocket sync frame: %v", err)
+	}
+
+	type notificationRecord struct {
+		Title string `json:"title"`
+		Body  string `json:"body"`
+	}
+	var notification notificationRecord
+	eventually(t, 5*time.Second, 20*time.Millisecond, func() (bool, string) {
+		data, err := os.ReadFile(h.notificationPath)
+		if err != nil {
+			return false, "notification file is not readable yet"
+		}
+		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		if len(lines) == 0 || lines[0] == "" {
+			return false, "notification file is empty"
+		}
+		var candidate notificationRecord
+		if err := json.Unmarshal([]byte(lines[len(lines)-1]), &candidate); err != nil {
+			return false, "notification record is not complete json yet"
+		}
+		if candidate.Body != "explicitly encrypted notification body" {
+			return false, "encrypted notification has not been decrypted yet"
+		}
+		notification = candidate
+		return true, "decrypted notification recorded"
+	})
+	if notification.Title != "explicitly encrypted notification title" || notification.Body != "explicitly encrypted notification body" {
+		t.Fatalf("notification payload did not match the decrypted message")
+	}
+}
+
+func TestClientListenWarnsWhenExplicitEncryptionKeyEnvIsUnavailable(t *testing.T) {
+	seed := defaultSeed()
+	seed.Queues = map[string][]mockpushover.Message{}
+	h := newHarness(t, seed)
+	writeState(t, h.configDir, config.State{DeviceID: fixtureDeviceID, DeviceName: "phone", Secret: fixtureSecret})
+	process := h.start(t, "client", "listen", "--encryption-key-env", "SOME_UNSET_ENCRYPTION_KEY_VAR_E2E")
+
+	eventually(t, 5*time.Second, 20*time.Millisecond, func() (bool, string) {
+		status, err := h.control.WSStatus()
+		stderr := process.Stderr()
+		return err == nil && status.Connected && status.LoginOK &&
+				strings.Contains(stderr, "level=WARN") &&
+				strings.Contains(stderr, "message decryption disabled"),
+			describeWSStatus(status, err) + "; listen stderr: " + stderr
+	})
+}
+
+func TestClientListenDoesNotWarnWhenEncryptionKeyIsUnconfigured(t *testing.T) {
+	seed := defaultSeed()
+	seed.Queues = map[string][]mockpushover.Message{}
+	h := newHarness(t, seed)
+	h.env = h.withEnv(map[string]string{"PUSHOVER_ENCRYPTION_KEY": ""})
+	writeState(t, h.configDir, config.State{DeviceID: fixtureDeviceID, DeviceName: "phone", Secret: fixtureSecret})
+	process := h.start(t, "client", "listen")
+
+	eventually(t, 5*time.Second, 20*time.Millisecond, func() (bool, string) {
+		status, err := h.control.WSStatus()
+		stderr := process.Stderr()
+		return err == nil && status.Connected && status.LoginOK && !strings.Contains(stderr, "level=WARN"),
+			describeWSStatus(status, err) + "; listen stderr: " + stderr
+	})
+}
+
 func TestClientListenSyncsQueuedMessageAfterReconnectWithoutSyncFrame(t *testing.T) {
 	seed := defaultSeed()
 	seed.Queues = map[string][]mockpushover.Message{}

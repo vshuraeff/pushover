@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -38,14 +39,15 @@ func newClientListenCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 			var encryptionKey []byte
 			if encodedKey, keyErr := config.Resolve(config.RoleEncryptionKey, config.RoleAppToken, envFlags); keyErr == nil {
 				encryptionKey, err = pushovercrypto.ParseKey(encodedKey)
 				if err != nil {
 					return fmt.Errorf("parse encryption key: %w", err)
 				}
-			} else if envFlags.EncryptionKeyEnv != "" {
-				fmt.Fprintf(cmd.ErrOrStderr(), "warning: message decryption disabled: %v\n", keyErr)
+			} else if !strings.HasPrefix(keyErr.Error(), "missing ") {
+				logger.Warn("message decryption disabled", "error", keyErr)
 			}
 			store, err := config.NewSessionStore()
 			if err != nil {
@@ -55,7 +57,6 @@ func newClientListenCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 			return listen.Run(cmd.Context(), &listen.Daemon{
 				Store:            store,
 				APIClient:        newOpenClient(),
