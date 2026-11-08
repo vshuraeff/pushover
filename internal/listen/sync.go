@@ -309,6 +309,13 @@ func (s *syncer) notification(ctx context.Context, message openclient.Message) n
 		notification.URL = s.decryptField(notification.URL)
 		notification.URLTitle = s.decryptField(notification.URLTitle)
 	}
+	if message.HTML == 1 {
+		body, link := renderHTML(notification.Body)
+		notification.Body = body
+		if notification.URL == "" {
+			notification.URL = link
+		}
+	}
 	if message.Priority == 2 && message.Receipt != "" {
 		notification.ThreadID = message.Receipt
 	}

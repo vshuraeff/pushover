@@ -55,6 +55,14 @@ func TestHelperNotifierProtocolRoundTrip(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatalf("Actions() timeout: %v", ctx.Err())
 	}
+	select {
+	case event := <-notifier.Actions():
+		if event.ID != "round-trip" || event.Action != ActionOpen || event.URL != "https://example.test/notification" {
+			t.Fatalf("Actions() click event = %#v", event)
+		}
+	case <-ctx.Done():
+		t.Fatalf("Actions() click timeout: %v", ctx.Err())
+	}
 
 	err = notifier.Notify(ctx, Notification{ID: "error", Title: "title", Body: "body"})
 	if err == nil || !strings.Contains(err.Error(), "fake delivery failed") {
@@ -147,6 +155,8 @@ func TestHelperSubprocess(t *testing.T) {
 		}
 		_ = encoder.Encode(HelperEvent{Event: "delivered", ID: request.ID})
 		_ = encoder.Encode(HelperEvent{Event: "action", Action: "ack", ID: request.ID, Thread: request.Thread})
+		_ = encoder.Encode(HelperEvent{Event: "clicked", ID: request.ID})
+		_ = encoder.Encode(HelperEvent{Event: "clicked", ID: request.ID, URL: request.URL})
 	}
 	if err := scanner.Err(); err != nil {
 		os.Exit(3)

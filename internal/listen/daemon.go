@@ -32,6 +32,8 @@ type Daemon struct {
 	IconCacheDir     string
 	SoundCacheDir    string
 	DeadLetterPath   string
+	// OpenURL opens a clicked notification's http(s) url; nil uses the system handler.
+	OpenURL func(ctx context.Context, target string) error
 }
 
 // run delivers the initial queue and then maintains the websocket engine.
@@ -118,9 +120,13 @@ func Run(ctx context.Context, daemon *Daemon) error {
 	}
 
 	if source, ok := daemon.Notifier.(notify.ActionSource); ok {
+		openURL := daemon.OpenURL
+		if openURL == nil {
+			openURL = openWithSystem
+		}
 		actionDone = make(chan struct{})
 		go func() {
-			runActions(runCtx, source.Actions(), daemon.APIClient, state.Secret, state.DeviceID, syncer.trigger, logger)
+			runActions(runCtx, source.Actions(), daemon.APIClient, state.Secret, state.DeviceID, syncer.trigger, openURL, logger)
 			close(actionDone)
 		}()
 	}

@@ -41,7 +41,11 @@ type ActionEvent struct {
 	ID     string
 	Action string
 	Thread string
+	URL    string
 }
+
+// ActionOpen is the action reported when the user clicks a notification that carries a url.
+const ActionOpen = "open"
 
 // actionsource is implemented by notifier backends that report post-delivery actions.
 type ActionSource interface {

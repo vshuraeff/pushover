@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -233,6 +234,53 @@ func TestClientListenDecryptsExplicitlyEncryptedMessage(t *testing.T) {
 	if notification.Title != "explicitly encrypted notification title" || notification.Body != "explicitly encrypted notification body" {
 		t.Fatalf("notification payload did not match the decrypted message")
 	}
+}
+
+func TestClientListenRendersHTMLMessageAsPlainText(t *testing.T) {
+	seed := defaultSeed()
+	seed.Queues = map[string][]mockpushover.Message{}
+	h := newHarness(t, seed)
+	writeState(t, h.configDir, config.State{DeviceID: fixtureDeviceID, DeviceName: "phone", Secret: fixtureSecret})
+	h.start(t, "client", "listen")
+
+	eventually(t, 5*time.Second, 20*time.Millisecond, func() (bool, string) {
+		status, err := h.control.WSStatus()
+		return err == nil && status.Connected && status.LoginOK && status.ConnectCount >= 1, describeWSStatus(status, err)
+	})
+
+	result := h.run(t,
+		"send", `<b>disk</b> at <font color="#ff0000">95%</font><br><a href="https://example.test/disk">details</a> &amp; more`,
+		"--user", fixtureUserKey,
+		"--device", "phone",
+		"--title", "html notification",
+		"--html",
+	)
+	requireSuccess(t, result)
+
+	if err := h.control.WSSend("!"); err != nil {
+		t.Fatalf("send websocket sync frame: %v", err)
+	}
+
+	const want = "disk at 95%\ndetails & more"
+	eventually(t, 5*time.Second, 20*time.Millisecond, func() (bool, string) {
+		data, err := os.ReadFile(h.notificationPath)
+		if err != nil {
+			return false, "notification file is not readable yet"
+		}
+		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		var candidate struct {
+			Title string `json:"title"`
+			Body  string `json:"body"`
+			URL   string `json:"url"`
+		}
+		if err := json.Unmarshal([]byte(lines[len(lines)-1]), &candidate); err != nil {
+			return false, "notification record is not complete json yet"
+		}
+		if candidate.Title != "html notification" || candidate.Body != want || candidate.URL != "https://example.test/disk" {
+			return false, "html notification body = " + strconv.Quote(candidate.Body) + " url = " + strconv.Quote(candidate.URL)
+		}
+		return true, "plain text notification recorded"
+	})
 }
 
 func TestClientListenWarnsWhenExplicitEncryptionKeyEnvIsUnavailable(t *testing.T) {

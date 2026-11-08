@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -89,6 +90,34 @@ func TestRunAcknowledgesNotificationAction(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for Run()")
+	}
+}
+
+func TestRunActionsOpensOnlyWebURLs(t *testing.T) {
+	actions := make(chan notify.ActionEvent, 8)
+	for _, target := range []string{
+		"https://example.test/ok",
+		"file:///etc/passwd",
+		"javascript:alert(1)",
+		"ssh://host.test",
+		"https:///no-host",
+		"not a url",
+		"http://example.test/also-ok",
+	} {
+		actions <- notify.ActionEvent{ID: "1", Action: notify.ActionOpen, URL: target}
+	}
+	close(actions)
+
+	var opened []string
+	runActions(context.Background(), actions, nil, "", "", func() { t.Error("open must not trigger a sync") },
+		func(_ context.Context, target string) error {
+			opened = append(opened, target)
+			return nil
+		}, testLogger())
+
+	want := []string{"https://example.test/ok", "http://example.test/also-ok"}
+	if !reflect.DeepEqual(opened, want) {
+		t.Fatalf("opened = %#v, want %#v", opened, want)
 	}
 }
 

@@ -226,9 +226,13 @@ func (h *HelperNotifier) readAndWait(cmd *exec.Cmd, stdout io.ReadCloser, done c
 		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
 			continue
 		}
-		if event.Event == "action" {
+		if event.Event == "action" || (event.Event == "clicked" && event.URL != "") {
+			action := ActionEvent{ID: event.ID, Action: event.Action, Thread: event.Thread}
+			if event.Event == "clicked" {
+				action = ActionEvent{ID: event.ID, Action: ActionOpen, URL: event.URL}
+			}
 			select {
-			case h.actions <- ActionEvent{ID: event.ID, Action: event.Action, Thread: event.Thread}:
+			case h.actions <- action:
 			default:
 			}
 			continue
