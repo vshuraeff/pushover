@@ -37,50 +37,25 @@ nfpms:
       - src: LICENSE
         dst: /usr/share/doc/povr/copyright
 
-dockers:
-  - id: povr-amd64
+dockers_v2:
+  - id: povr
     ids:
       - povr
-    goos: linux
-    goarch: amd64
-    use: buildx
     dockerfile: Dockerfile
-    image_templates:
-      - ghcr.io/vshuraeff/povr:{{ .Version }}-amd64
-    build_flag_templates:
-      - --platform=linux/amd64
-      - --label=org.opencontainers.image.source=https://github.com/vshuraeff/pushover
-      - --label=org.opencontainers.image.version={{ .Version }}
-      - --label=org.opencontainers.image.revision={{ .FullCommit }}
-      - --label=org.opencontainers.image.licenses=MIT
-      - --label=org.opencontainers.image.description=Unofficial Pushover CLI client
-  - id: povr-arm64
-    ids:
-      - povr
-    goos: linux
-    goarch: arm64
-    use: buildx
-    dockerfile: Dockerfile
-    image_templates:
-      - ghcr.io/vshuraeff/povr:{{ .Version }}-arm64
-    build_flag_templates:
-      - --platform=linux/arm64
-      - --label=org.opencontainers.image.source=https://github.com/vshuraeff/pushover
-      - --label=org.opencontainers.image.version={{ .Version }}
-      - --label=org.opencontainers.image.revision={{ .FullCommit }}
-      - --label=org.opencontainers.image.licenses=MIT
-      - --label=org.opencontainers.image.description=Unofficial Pushover CLI client
-
-docker_manifests:
-  - name_template: ghcr.io/vshuraeff/povr:{{ .Version }}
-    image_templates:
-      - ghcr.io/vshuraeff/povr:{{ .Version }}-amd64
-      - ghcr.io/vshuraeff/povr:{{ .Version }}-arm64
-  - name_template: ghcr.io/vshuraeff/povr:latest
-    skip_push: auto
-    image_templates:
-      - ghcr.io/vshuraeff/povr:{{ .Version }}-amd64
-      - ghcr.io/vshuraeff/povr:{{ .Version }}-arm64
+    images:
+      - ghcr.io/vshuraeff/povr
+    tags:
+      - '{{ .Version }}'
+      - '{{ if not .Prerelease }}latest{{ end }}'
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      org.opencontainers.image.source: https://github.com/vshuraeff/pushover
+      org.opencontainers.image.version: '{{ .Version }}'
+      org.opencontainers.image.revision: '{{ .FullCommit }}'
+      org.opencontainers.image.licenses: MIT
+      org.opencontainers.image.description: Unofficial Pushover CLI client
 
 checksum:
   name_template: checksums.txt

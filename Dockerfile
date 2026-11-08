@@ -6,7 +6,8 @@ RUN apk add --no-cache ca-certificates && mkdir -p /data && chown 65532:65532 /d
 FROM scratch
 
 COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY povr /povr
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/povr /povr
 COPY --from=certs --chown=65532:65532 /data /data
 
 ENV PUSHOVER_CONFIG_DIR=/data
